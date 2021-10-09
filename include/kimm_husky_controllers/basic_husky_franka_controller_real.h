@@ -21,6 +21,10 @@
 #include <ros/package.h>
 #include <realtime_tools/realtime_publisher.h>
 #include "mujoco_ros_msgs/JointSet.h"
+#include "visualization_msgs/Marker.h"
+
+// tf
+#include <tf/transform_broadcaster.h>
 
 // Franka
 #include <franka/robot_state.h>
@@ -124,7 +128,8 @@ class BasicHuskyFrankaController : public controller_interface::MultiInterfaceCo
  private: 
     ros::Subscriber odom_subs_, husky_state_subs_;
     realtime_tools::RealtimePublisher<geometry_msgs::Twist> husky_ctrl_pub_;
-    ros::Publisher ee_state_pub_, base_state_pub_, torque_state_pub_, joint_state_pub_, time_pub_;
+    ros::Publisher ee_state_pub_, base_state_pub_, torque_state_pub_, joint_state_pub_, time_pub_, husky_odom_pub_;
+    tf::TransformBroadcaster* br_;
 
     nav_msgs::Odometry odom_msg_;
     sensor_msgs::JointState husky_state_msg_;

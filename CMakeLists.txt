@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   roslib
+  tf
 )
 
 find_package(Eigen3 REQUIRED)
@@ -37,6 +38,7 @@ catkin_package(
     hardware_interface
     pluginlib
     realtime_tools
+    tf
     roscpp
   DEPENDS Franka
 )

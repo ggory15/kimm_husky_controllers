@@ -20,12 +20,14 @@ bool BasicHuskyFrankaController::init(hardware_interface::RobotHW* robot_hw, ros
   
   ctrl_type_sub_ = node_handle.subscribe("/" + group_name_ + "/real_robot/ctrl_type", 1, &BasicHuskyFrankaController::ctrltypeCallback, this);
   odom_subs_ = node_handle.subscribe("/husky_velocity_controller/odom", 1, &BasicHuskyFrankaController::odomCallback, this);
+  husky_state_msg_.position.resize(4);
   husky_state_msg_.velocity.resize(4);
   husky_state_subs_ = node_handle.subscribe("/joint_states", 1, &BasicHuskyFrankaController::huskystateCallback, this);
   
   torque_state_pub_ = node_handle.advertise<mujoco_ros_msgs::JointSet>("/" + group_name_ + "/real_robot/joint_set", 5);
   joint_state_pub_ = node_handle.advertise<sensor_msgs::JointState>("/" + group_name_ + "/real_robot/joint_states", 5);
   time_pub_ = node_handle.advertise<std_msgs::Float32>("/" + group_name_ + "/time", 1);
+  husky_odom_pub_ = node_handle.advertise<visualization_msgs::Marker>("husky_odom", 1);
 
   ee_state_pub_ = node_handle.advertise<geometry_msgs::Transform>("/" + group_name_ + "/real_robot/ee_state", 5);
   ee_state_msg_ = geometry_msgs::Transform();
@@ -119,10 +121,33 @@ void BasicHuskyFrankaController::starting(const ros::Time& time) {
   time_ = 0.;
 
   robot_command_msg_.torque.resize(7);
-  robot_state_msg_.position.resize(9);
-  robot_state_msg_.velocity.resize(9);   
+  robot_state_msg_.position.resize(11);
+  robot_state_msg_.velocity.resize(11);   
 
   husky_qvel_prev_.setZero(2);
+
+  visualization_msgs::Marker marker;
+  marker.header.frame_id = "husky_odom";
+  marker.header.stamp = ros::Time();
+  marker.ns = "husky_odom";
+  marker.id = 0;
+  marker.type = visualization_msgs::Marker::MESH_RESOURCE;
+  marker.pose.position.x = 0;
+  marker.pose.position.y = 0;
+  marker.pose.position.z = 0;
+  marker.pose.orientation.x = 0.0;
+  marker.pose.orientation.y = 0.0;
+  marker.pose.orientation.z = 0.0;
+  marker.pose.orientation.w = 1.0;
+  marker.scale.x = 1;
+  marker.scale.y = 0.1;
+  marker.scale.z = 0.1;
+  marker.color.a = 1.0; // Don't forget to set the alpha!
+  marker.color.r = 0.0;
+  marker.color.g = 1.0;
+  marker.color.b = 0.0;
+  
+  husky_odom_pub_.publish( marker );
 }
 
 
@@ -170,11 +195,16 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   wheel_vel(1) = husky_state_msg_.velocity[0]; // right vel (bot use.)
   ctrl_->husky_update(odom_lpf_, odom_dot_lpf_, Vector2d::Zero(), wheel_vel);
 
+  robot_state_msg_.position[0] = husky_state_msg_.position[1];
+  robot_state_msg_.position[1] = husky_state_msg_.position[0];
+  robot_state_msg_.velocity[0] = wheel_vel(0);
+  robot_state_msg_.velocity[1] = wheel_vel(1);
+
   // Franka update
   ctrl_->franka_update(franka_q, dq_filtered_);
   for (int i=0; i<7; i++){
-      robot_state_msg_.position[i] = franka_q(i);
-      robot_state_msg_.velocity[i] = dq_filtered_(i);
+      robot_state_msg_.position[i+2] = franka_q(i+2);
+      robot_state_msg_.velocity[i+2] = dq_filtered_(i+2);
   }
 
   this->getEEState();
@@ -241,6 +271,13 @@ void BasicHuskyFrankaController::huskystateCallback(const sensor_msgs::JointStat
 {
     if (msg->name.size()==4)
       husky_state_msg_ = *msg;
+
+    // tf::Transform transform;
+    // transform.setOrigin( tf::Vector3(msg->position[0], msg->position[1], msg->position[2]) );
+    // tf::Quaternion q(msg->position[4], msg->position[5], msg->position[6], msg->position[3]);
+    // //tf::Quaternion q(0, 0, 0, 1);
+    // transform.setRotation(q);
+    // br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "base_link"));
 }
 void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr &msg){
     // calculation_mutex_.lock();
