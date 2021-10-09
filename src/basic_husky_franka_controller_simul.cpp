@@ -32,6 +32,8 @@ int main(int argc, char **argv)
     // robot pub
     base_state_pub_ = n_node.advertise<sensor_msgs::JointState>("/mujoco_ros_interface/base_state", 5);
     ee_state_pub_ = n_node.advertise<geometry_msgs::Transform>("/mujoco_ros_interface/ee_state", 5);
+    br_ = new tf::TransformBroadcaster();
+    husky_odom_pub_ = n_node.advertise<visualization_msgs::Marker>("husky_odom", 1);
 
     // msg 
     robot_command_msg_.torque.resize(13); // gripper(2) + wheels(4) + robot (7)
@@ -107,6 +109,13 @@ void simTimeCallback(const std_msgs::Float32ConstPtr &msg){
 void JointStateCallback(const sensor_msgs::JointState::ConstPtr& msg){
     ctrl_->franka_update(msg);
     ctrl_->husky_update(msg);
+
+    tf::Transform transform;
+    transform.setOrigin( tf::Vector3(msg->position[0], msg->position[1], msg->position[2]) );
+    tf::Quaternion q(msg->position[4], msg->position[5], msg->position[6], msg->position[3]);
+    //tf::Quaternion q(0, 0, 0, 1);
+    transform.setRotation(q);
+    br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "base_link"));
 }
 
 void ctrltypeCallback(const std_msgs::Int16ConstPtr &msg){
@@ -173,6 +182,31 @@ void getBaseState(){
         base_state_msg_.position[i] = pos(i);
 
     base_state_pub_.publish(base_state_msg_);
+}
+
+void odomPublish(){
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = "husky_odom";
+    marker.header.stamp = ros::Time();
+    marker.ns = "husky_odom";
+    marker.id = 0;
+    marker.type = visualization_msgs::Marker::MESH_RESOURCE;
+    marker.pose.position.x = 0;
+    marker.pose.position.y = 0;
+    marker.pose.position.z = 0;
+    marker.pose.orientation.x = 0.0;
+    marker.pose.orientation.y = 0.0;
+    marker.pose.orientation.z = 0.0;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = 1;
+    marker.scale.y = 0.1;
+    marker.scale.z = 0.1;
+    marker.color.a = 1.0; // Don't forget to set the alpha!
+    marker.color.r = 0.0;
+    marker.color.g = 1.0;
+    marker.color.b = 0.0;
+    
+    husky_odom_pub_.publish( marker );
 }
 
 void keyboard_event(){
