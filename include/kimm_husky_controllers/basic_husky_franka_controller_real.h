@@ -149,11 +149,11 @@ class BasicHuskyFrankaController : public controller_interface::MultiInterfaceCo
     std::vector<hardware_interface::JointHandle> joint_handles_;
     std::string group_name_;
 
-    actionlib::SimpleActionClient<franka_gripper::MoveAction> gripper_ac_{"/franka_gripper/move", true};
-    actionlib::SimpleActionClient<franka_gripper::GraspAction> gripper_grasp_ac_{"/franka_gripper/grasp", true};
+    actionlib::SimpleActionClient<franka_gripper::MoveAction> gripper_ac_{"franka_gripper/move", true};
+    actionlib::SimpleActionClient<franka_gripper::GraspAction> gripper_grasp_ac_{"franka_gripper/grasp", true};
 
     franka_gripper::GraspGoal goal;
-    franka_hw::TriggerRate print_rate_trigger_{10}; 
+    franka_hw::TriggerRate print_rate_trigger_{1}; 
     franka_hw::TriggerRate husky_base_control_trigger_{100};
     Eigen::Matrix<double, 7, 1> saturateTorqueRate(const Eigen::Matrix<double, 7, 1>& tau_d_calculated, const Eigen::Matrix<double, 7, 1>& tau_J_d);
 

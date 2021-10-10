@@ -1,22 +1,57 @@
 <?xml version="1.0" ?>
 <launch>
+
+<group ns ="ns0">
+<group ns ="husky">
+    <arg name="port" default="$(optenv HUSKY_PORT /dev/prolific)" />
+
+    <!-- Husky harware driver -->
+    <node pkg="husky_base" type="husky_node" name="husky_node">
+        <rosparam subst_value="true">
+            port: $(arg port)
+
+            control_frequency: 10.0
+            diagnostic_frequency: 1.0
+
+            max_acceleration: 3.0
+            max_speed: 1.0
+            wheel_diameter: 0.3302
+            polling_timeout: 10.0
+        </rosparam>
+    </node>
+
+    <!-- Differential controller parameters and basic localization -->
+    <include file="$(find husky_control)/launch/control.launch" />
+
+    <!--Teleop -->
+    <include file="$(find husky_control)/launch/teleop.launch" />
+
+    <!-- Diagnostic Aggregator -->
+    <node pkg="diagnostic_aggregator" type="aggregator_node" name="diagnostic_aggregator">
+        <rosparam command="load" file="$(find husky_base)/config/diagnostics.yaml"/>
+    </node>
+  </group>
+  </group>
+
   <arg name="robot_ip" default="192.168.10.202" />
   <arg name="load_gripper" default="true" />
   <param name="robot_group" type="string" value="ns0"/>
   <param name="issimulation" type="bool" value="false"/>
 
+  <group ns ="ns0">
   <include file="$(find franka_control)/launch/franka_control.launch" >
     <arg name="robot_ip" value="$(arg robot_ip)" />
     <arg name="load_gripper" value="$(arg load_gripper)" />
   </include>
 
-  <group ns ="ns0">
+  
     <param name="robot_urdf_path" type="string" value="$(find husky_description)"/>
     <param name="robot_urdf" type="string" value="/husky_single/husky_panda_hand_free.urdf"/>
-  </group>
+  
 
   <rosparam command="load" file="$(find kimm_husky_controllers)/config/kimm_husky_controllers.yaml" />
   
   <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false" output="screen"  args="basic_husky_franka_controller"/>
+  </group>
   <!-- <node pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find kimm_franka_controllers)/launch/robot.rviz"/> -->
 </launch>

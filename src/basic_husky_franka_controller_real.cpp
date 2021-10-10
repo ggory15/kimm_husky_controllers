@@ -16,13 +16,13 @@ bool BasicHuskyFrankaController::init(hardware_interface::RobotHW* robot_hw, ros
 {
 
   node_handle.getParam("/robot_group", group_name_);
-  husky_ctrl_pub_.init(node_handle, "/cmd_vel", 4);
+  husky_ctrl_pub_.init(node_handle, "/" + group_name_ + "/husky/cmd_vel", 4);
   
   ctrl_type_sub_ = node_handle.subscribe("/" + group_name_ + "/real_robot/ctrl_type", 1, &BasicHuskyFrankaController::ctrltypeCallback, this);
-  odom_subs_ = node_handle.subscribe("/husky_velocity_controller/odom", 1, &BasicHuskyFrankaController::odomCallback, this);
+  odom_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky_velocity_controller/odom", 1, &BasicHuskyFrankaController::odomCallback, this);
   husky_state_msg_.position.resize(4);
   husky_state_msg_.velocity.resize(4);
-  husky_state_subs_ = node_handle.subscribe("/joint_states", 1, &BasicHuskyFrankaController::huskystateCallback, this);
+  husky_state_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky/joint_states", 1, &BasicHuskyFrankaController::huskystateCallback, this);
   
   torque_state_pub_ = node_handle.advertise<mujoco_ros_msgs::JointSet>("/" + group_name_ + "/real_robot/joint_set", 5);
   joint_state_pub_ = node_handle.advertise<sensor_msgs::JointState>("/" + group_name_ + "/real_robot/joint_states", 5);
@@ -96,13 +96,14 @@ bool BasicHuskyFrankaController::init(hardware_interface::RobotHW* robot_hw, ros
       ROS_ERROR_STREAM("ForceExampleController: Exception getting joint handles: " << ex.what());
       return false;
     }
-  }
+  }  
 
   //keyboard event
   mode_change_thread_ = std::thread(&BasicHuskyFrankaController::modeChangeReaderProc, this);
 
   ctrl_ = new RobotController::HuskyFrankaWrapper(group_name_, false, node_handle);
   ctrl_->initialize();
+  
   
   return true;
 }
@@ -125,6 +126,8 @@ void BasicHuskyFrankaController::starting(const ros::Time& time) {
   robot_state_msg_.velocity.resize(11);   
 
   husky_qvel_prev_.setZero(2);
+  
+  br_ = new tf::TransformBroadcaster();
 
   visualization_msgs::Marker marker;
   marker.header.frame_id = "husky_odom";
@@ -148,6 +151,7 @@ void BasicHuskyFrankaController::starting(const ros::Time& time) {
   marker.color.b = 0.0;
   
   husky_odom_pub_.publish( marker );
+  
 }
 
 
@@ -193,6 +197,13 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   Vector2d wheel_vel;
   wheel_vel(0) = husky_state_msg_.velocity[1]; // left vel
   wheel_vel(1) = husky_state_msg_.velocity[0]; // right vel (bot use.)
+  tf::Transform transform;
+  transform.setOrigin( tf::Vector3(odom_msg_.pose.pose.position.x, odom_msg_.pose.pose.position.y, odom_msg_.pose.pose.position.z) );
+  tf::Quaternion q;
+  q.setRPY(0, 0, odom_msg_.pose.pose.orientation.z);
+  transform.setRotation(q);
+  br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "rviz_base_link"));
+
   ctrl_->husky_update(odom_lpf_, odom_dot_lpf_, Vector2d::Zero(), wheel_vel);
 
   robot_state_msg_.position[0] = husky_state_msg_.position[1];
@@ -203,12 +214,9 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   // Franka update
   ctrl_->franka_update(franka_q, dq_filtered_);
   for (int i=0; i<7; i++){
-      robot_state_msg_.position[i+2] = franka_q(i+2);
-      robot_state_msg_.velocity[i+2] = dq_filtered_(i+2);
+      robot_state_msg_.position[i+2] = franka_q(i);
+      robot_state_msg_.velocity[i+2] = dq_filtered_(i);
   }
-
-  this->getEEState();
-  this->getBaseState();
 
   // HQP thread
   
@@ -234,6 +242,9 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
     }
   }
   
+  franka_torque_.setZero();
+  husky_cmd_.setZero();
+
   for (int i = 0; i < 7; i++)
     joint_handles_[i].setCommand(franka_torque_(i));
 
@@ -253,11 +264,11 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   joint_state_pub_.publish(robot_state_msg_);
   torque_state_pub_.publish(robot_command_msg_);
 
-  if (print_rate_trigger_())
-    {
-      ROS_INFO("--------------------------------------------------");
-      ROS_INFO_STREAM("tau :" << franka_torque_.transpose());
-    }
+  // if (print_rate_trigger_())
+  //   {
+  //     ROS_INFO("--------------------------------------------------");
+  //     ROS_INFO_STREAM("tau :" << franka_torque_.transpose());
+  //   }
 
 }
 void BasicHuskyFrankaController::stopping(const ros::Time& time){
@@ -272,12 +283,7 @@ void BasicHuskyFrankaController::huskystateCallback(const sensor_msgs::JointStat
     if (msg->name.size()==4)
       husky_state_msg_ = *msg;
 
-    // tf::Transform transform;
-    // transform.setOrigin( tf::Vector3(msg->position[0], msg->position[1], msg->position[2]) );
-    // tf::Quaternion q(msg->position[4], msg->position[5], msg->position[6], msg->position[3]);
-    // //tf::Quaternion q(0, 0, 0, 1);
-    // transform.setRotation(q);
-    // br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "base_link"));
+    
 }
 void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr &msg){
     // calculation_mutex_.lock();
@@ -342,6 +348,9 @@ void BasicHuskyFrankaController::asyncCalculationProc(){
 
   this->setFrankaCommand();
   this->setHuskyCommand();
+
+  this->getEEState();
+  this->getBaseState();
     
 /*
   if (ctrl_->ctrltype() != 0)

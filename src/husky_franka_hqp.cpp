@@ -104,9 +104,9 @@ namespace RobotController{
         solver_ = SolverHQPFactory::createNewSolver(SOLVER_HQP_QPOASES, "qpoases");           
 
         // service
-        mobile_action_client_ = n_node_.serviceClient<kimm_path_planner_ros_interface::action_mobile_path>("/ns0/kimm_path_planner_ros_interface_server/action_mobile_path");
-        joint_action_client_ = n_node_.serviceClient<kimm_joint_planner_ros_interface::action_joint_path>("/" + robot_node_ + "/kimm_joint_planner_ros_interface_server/action_joint_path");
-        se3_action_client_ = n_node_.serviceClient<kimm_se3_planner_ros_interface::action_se3_path>("/" + robot_node_ + "/kimm_se3_planner_ros_interface_server/action_se3_path");    
+        mobile_action_client_ = n_node_.serviceClient<kimm_path_planner_ros_interface::action_mobile_path>("/" + robot_node_ + "_gui/kimm_path_planner_ros_interface_server/action_mobile_path");
+        joint_action_client_ = n_node_.serviceClient<kimm_joint_planner_ros_interface::action_joint_path>("/" + robot_node_ + "_gui/kimm_joint_planner_ros_interface_server/action_joint_path");
+        se3_action_client_ = n_node_.serviceClient<kimm_se3_planner_ros_interface::action_se3_path>("/" + robot_node_ + "_gui/kimm_se3_planner_ros_interface_server/action_se3_path");    
     }
     
     void HuskyFrankaWrapper::franka_update(const sensor_msgs::JointState::ConstPtr& msg){
