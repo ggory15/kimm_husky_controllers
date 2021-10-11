@@ -9,6 +9,7 @@
 
 #include <franka/robot_state.h>
 
+
 namespace kimm_husky_controllers
 {
 
@@ -16,10 +17,10 @@ bool BasicHuskyFrankaController::init(hardware_interface::RobotHW* robot_hw, ros
 {
 
   node_handle.getParam("/robot_group", group_name_);
-  husky_ctrl_pub_.init(node_handle, "/" + group_name_ + "/husky/cmd_vel", 4);
+  husky_ctrl_pub_.init(node_handle, "/" + group_name_ + "/husky/husky_velocity_controller/cmd_vel", 4);
   
   ctrl_type_sub_ = node_handle.subscribe("/" + group_name_ + "/real_robot/ctrl_type", 1, &BasicHuskyFrankaController::ctrltypeCallback, this);
-  odom_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky_velocity_controller/odom", 1, &BasicHuskyFrankaController::odomCallback, this);
+  odom_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky/husky_velocity_controller/odom", 1, &BasicHuskyFrankaController::odomCallback, this);
   husky_state_msg_.position.resize(4);
   husky_state_msg_.velocity.resize(4);
   husky_state_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky/joint_states", 1, &BasicHuskyFrankaController::huskystateCallback, this);
@@ -192,15 +193,17 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   odom_dot_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.twist.twist.angular.z, odom_dot_lpf_prev_(2), 100);
   odom_lpf_prev_ = odom_lpf_;
   odom_dot_lpf_prev_ = odom_dot_lpf_;
- 
+  
   // Husky update
   Vector2d wheel_vel;
   wheel_vel(0) = husky_state_msg_.velocity[1]; // left vel
-  wheel_vel(1) = husky_state_msg_.velocity[0]; // right vel (bot use.)
+  wheel_vel(1) = husky_state_msg_.velocity[0]; // right vel (not use.)
+  
+
   tf::Transform transform;
-  transform.setOrigin( tf::Vector3(odom_msg_.pose.pose.position.x, odom_msg_.pose.pose.position.y, odom_msg_.pose.pose.position.z) );
+  transform.setOrigin( tf::Vector3(odom_lpf_(0), odom_lpf_(1), 0.0 ));
   tf::Quaternion q;
-  q.setRPY(0, 0, odom_msg_.pose.pose.orientation.z);
+  q.setRPY(0, 0, odom_lpf_(2));
   transform.setRotation(q);
   br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "rviz_base_link"));
 
@@ -230,7 +233,7 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   }
 
   ros::Rate r(30000);
-  for (int i = 0; i < 7; i++)
+  for (int i = 0; i < 9; i++)
   {
     r.sleep();
     if (calculation_mutex_.try_lock())
@@ -240,6 +243,13 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
         async_calculation_thread_.join();
       break;
     }
+  }
+  
+  if (print_rate_trigger_())
+  {
+    ROS_INFO("--------------------------------------------------");
+    ROS_INFO_STREAM("franka_torque_ :" << franka_torque_.transpose());
+    ROS_INFO_STREAM("husky_cmd_ :" << husky_cmd_.transpose());
   }
   
   franka_torque_.setZero();
@@ -265,10 +275,10 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   torque_state_pub_.publish(robot_command_msg_);
 
   // if (print_rate_trigger_())
-  //   {
-  //     ROS_INFO("--------------------------------------------------");
-  //     ROS_INFO_STREAM("tau :" << franka_torque_.transpose());
-  //   }
+  // {
+  //   ROS_INFO("--------------------------------------------------");
+  //   ROS_INFO_STREAM("odom_lpf_ :" << odom_lpf_.transpose());
+  // }
 
 }
 void BasicHuskyFrankaController::stopping(const ros::Time& time){
@@ -339,12 +349,13 @@ void BasicHuskyFrankaController::asyncCalculationProc(){
   Kd(5, 5) = 0.5;
   Kd(4, 4) = 0.5;
   Kd(6, 6) = 0.5; // this is practical term
-  franka_torque_ -= Kd * dq_filtered_;  
+ // franka_torque_ -= Kd * dq_filtered_;  
   franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
 
   husky_qvel_ = husky_qacc_ * 0.001 + husky_qvel_prev_;
   husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
   husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
+  husky_qvel_prev_ = husky_qvel_;
 
   this->setFrankaCommand();
   this->setHuskyCommand();

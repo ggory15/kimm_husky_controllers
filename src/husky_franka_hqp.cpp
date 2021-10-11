@@ -51,7 +51,7 @@ namespace RobotController{
         postureTask_ = std::make_shared<TaskJointPosture>("task-posture", *robot_);
         VectorXd posture_gain(na_ -2);
         if (!issimulation_)
-        	posture_gain << 400., 1100., 300., 120., 120., 120., 80.;
+        	posture_gain << 100., 100., 100., 100., 100., 100., 80.;
         else
         	posture_gain << 4000., 4000., 4000., 4000., 4000., 4000., 4000.;
         	
@@ -60,15 +60,15 @@ namespace RobotController{
 
         Vector3d ee_offset(0.0, 0, 0.0);
         VectorXd ee_gain(6);
-        ee_gain << 400., 400., 400., 200., 200., 200.;
+        ee_gain << 200., 200., 200., 100., 100., 100.;
         eeTask_ = std::make_shared<TaskSE3Equality>("task-se3", *robot_, "panda_joint7", ee_offset);
         eeTask_->Kp(ee_gain*Vector::Ones(6));
         eeTask_->Kd(2.0*eeTask_->Kp().cwiseSqrt());
         
         torqueBoundsTask_ = std::make_shared<TaskJointBounds>("task-torque-bounds", *robot_);
-        Vector dq_max = 10.0*Vector::Ones(na_);    
-        dq_max(0) = 500.0;
-        dq_max(1) = 500.0;
+        Vector dq_max = 500000.0*Vector::Ones(na_);    
+        dq_max(0) = 5000.0;
+        dq_max(1) = 5000.0;
         Vector dq_min = -dq_max;
         torqueBoundsTask_->setJointBounds(dq_min, dq_max);
 
@@ -118,8 +118,8 @@ namespace RobotController{
     }
     void HuskyFrankaWrapper::franka_update(const Vector7d& q, const Vector7d& qdot){
         assert(!issimulation_);
-        state_.q_.tail(na_-2) = q;
-        state_.v_.tail(na_-2) = qdot;
+        state_.q_.tail(7) = q;
+        state_.v_.tail(7) = qdot;
     }
     void HuskyFrankaWrapper::husky_update(const sensor_msgs::JointState::ConstPtr& msg){
         assert(issimulation_);
@@ -182,7 +182,7 @@ namespace RobotController{
                 q_ref_(6) = M_PI/ 4.0;
 
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                trajPosture_Cubic_->setDuration(1.0);
+                trajPosture_Cubic_->setDuration(5.0);
                 trajPosture_Cubic_->setStartTime(time_);
                 trajPosture_Cubic_->setGoalSample(q_ref_);      
                             
@@ -195,8 +195,8 @@ namespace RobotController{
            
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
 
-            state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
-            state_.torque_.head(2).setZero();
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+            
         }
         if (ctrl_mode_ == 2){
             if (mode_change_){
@@ -211,7 +211,7 @@ namespace RobotController{
                 tsid_->addMotionTask(*postureTask_, 1e-6, 1);
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1.0, 0);
-                tsid_->addMotionTask(*mobileTask_, 1.0, 0);
+                tsid_->addMotionTask(*mobileTask2_, 1.0, 0);
 
                 //traj
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
@@ -223,8 +223,8 @@ namespace RobotController{
                 trajEE_Cubic_->setDuration(5.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(0) += 0.15;
-                H_ee_ref_.translation()(1) += 0.15;                
+                H_ee_ref_.translation()(0) += 0.05;  
+                // H_ee_ref_.translation()(1) += 0.05;                              
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
                 H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
@@ -238,7 +238,7 @@ namespace RobotController{
             // husky
             trajMobile_Constant_->setReference(H_mobile_ref_);
             sampleMobile_ = trajMobile_Constant_->computeNext();
-            mobileTask_->setReference(sampleMobile_);
+            mobileTask2_->setReference(sampleMobile_);
 
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
@@ -250,6 +250,8 @@ namespace RobotController{
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));        
+         //   state_.torque_(0) = 500;
+         //   state_.torque_(1) = 500;
         }        
 
         ///////////////////////// Predefined CTRL for GUI //////////////////////////////////////////////////

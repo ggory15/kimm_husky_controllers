@@ -153,12 +153,12 @@ class BasicHuskyFrankaController : public controller_interface::MultiInterfaceCo
     actionlib::SimpleActionClient<franka_gripper::GraspAction> gripper_grasp_ac_{"franka_gripper/grasp", true};
 
     franka_gripper::GraspGoal goal;
-    franka_hw::TriggerRate print_rate_trigger_{1}; 
+    franka_hw::TriggerRate print_rate_trigger_{100}; 
     franka_hw::TriggerRate husky_base_control_trigger_{100};
     Eigen::Matrix<double, 7, 1> saturateTorqueRate(const Eigen::Matrix<double, 7, 1>& tau_d_calculated, const Eigen::Matrix<double, 7, 1>& tau_J_d);
 
     // Variables
-    const double delta_tau_max_{20.0};
+    const double delta_tau_max_{5.0};
     Vector7d dq_filtered_, franka_torque_;
     Vector3d odom_lpf_, odom_dot_lpf_, odom_lpf_prev_, odom_dot_lpf_prev_;
     Eigen::VectorXd franka_qacc_, robot_nle_, robot_g_, husky_qvel_, husky_qacc_, husky_qvel_prev_;
