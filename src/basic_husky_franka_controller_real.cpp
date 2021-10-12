@@ -177,7 +177,8 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   robot_J_ = jacobian;
   Eigen::Map<Vector7d> franka_q(robot_state.q.data());
   Eigen::Map<Vector7d> franka_dq(robot_state.dq.data());
-  
+  franka_q_ = franka_q;
+
   // Filtering
   double cutoff = 20.0; // Hz //20
   double RC = 1.0 / (cutoff * 2.0 * M_PI);
@@ -196,9 +197,8 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   odom_dot_lpf_prev_ = odom_dot_lpf_;
   
   // Husky update
-  Vector2d wheel_vel;
-  wheel_vel(0) = husky_state_msg_.velocity[1]; // left vel
-  wheel_vel(1) = husky_state_msg_.velocity[0]; // right vel (not use.)
+  wheel_vel_(0) = husky_state_msg_.velocity[1]; // left vel
+  wheel_vel_(1) = husky_state_msg_.velocity[0]; // right vel (not use.)
 
   tf::Transform transform;
   transform.setOrigin( tf::Vector3(odom_lpf_(0), odom_lpf_(1), 0.0 ));
@@ -207,15 +207,14 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   transform.setRotation(q);
   br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "rviz_base_link"));
 
-  ctrl_->husky_update(odom_lpf_, odom_dot_lpf_, Vector2d::Zero(), wheel_vel);
-
+  
   robot_state_msg_.position[0] = husky_state_msg_.position[1];
   robot_state_msg_.position[1] = husky_state_msg_.position[0];
-  robot_state_msg_.velocity[0] = wheel_vel(0);
-  robot_state_msg_.velocity[1] = wheel_vel(1);
+  robot_state_msg_.velocity[0] = wheel_vel_(0);
+  robot_state_msg_.velocity[1] = wheel_vel_(1);
 
   // Franka update
-  ctrl_->franka_update(franka_q, dq_filtered_);
+  
   for (int i=0; i<7; i++){
       robot_state_msg_.position[i+2] = franka_q(i);
       robot_state_msg_.velocity[i+2] = dq_filtered_(i);
@@ -223,27 +222,28 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
 
   // HQP thread
   
-  // if (calculation_mutex_.try_lock())
-  // {
-  //   calculation_mutex_.unlock();
-  //   if (async_calculation_thread_.joinable())
-  //     async_calculation_thread_.join();
+  if (calculation_mutex_.try_lock())
+  {
+    calculation_mutex_.unlock();
+    if (async_calculation_thread_.joinable())
+      async_calculation_thread_.join();
 
-  //   async_calculation_thread_ = std::thread(&BasicHuskyFrankaController::asyncCalculationProc, this);
-  // }
+    async_calculation_thread_ = std::thread(&BasicHuskyFrankaController::asyncCalculationProc, this);
+  }
 
-  // ros::Rate r(30000);
-  // for (int i = 0; i < 9; i++)
-  // {
-  //   r.sleep();
-  //   if (calculation_mutex_.try_lock())
-  //   {
-  //     calculation_mutex_.unlock();
-  //     if (async_calculation_thread_.joinable())
-  //       async_calculation_thread_.join();
-  //     break;
-  //   }
-  // }
+  ros::Rate r(30000);
+  for (int i = 0; i < 9; i++)
+  {
+    r.sleep();
+    if (calculation_mutex_.try_lock())
+    {
+      calculation_mutex_.unlock();
+      if (async_calculation_thread_.joinable())
+        async_calculation_thread_.join();
+      break;
+    }
+  }
+  
   
   ctrl_->compute(time_);
   
@@ -269,7 +269,7 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
 
   husky_qvel_ = husky_qacc_ * 0.01;//  + husky_qvel_prev_;
-  double thes_vel = 1.0;
+  double thes_vel = 3.0;
   if (husky_qvel_(0) > thes_vel)
     husky_qvel_(0) = thes_vel;
   else if (husky_qvel_(0) < -thes_vel)
@@ -278,6 +278,12 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
     husky_qvel_(1) = thes_vel;
   else if (husky_qvel_(1) < -thes_vel)
     husky_qvel_(1) = -thes_vel;  
+  
+  if (abs(husky_qvel_(0)) < 0.1)
+    husky_qvel_(0) = 0.0;
+  if (abs(husky_qvel_(1)) < 0.1)
+    husky_qvel_(1) = 0.0;
+
     
   husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
   husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
@@ -298,8 +304,8 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   //   ROS_INFO_STREAM("husky_cmd_ :" << husky_cmd_.transpose());
   // }
   
- // franka_torque_.setZero();
- // husky_cmd_.setZero();
+//  franka_torque_.setZero();
+//  husky_cmd_.setZero();
 
   for (int i = 0; i < 7; i++)
     joint_handles_[i].setCommand(franka_torque_(i));
@@ -365,7 +371,7 @@ void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr 
             epsilon.inner = 0.01;
             epsilon.outer = 0.01;
             goal.speed = 0.1;
-            goal.width = 0.03;
+            goal.width = 0.01;
             goal.force = 40.0;
             goal.epsilon = epsilon;
             gripper_grasp_ac_.sendGoal(goal);
@@ -375,52 +381,55 @@ void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr 
 }
 void BasicHuskyFrankaController::asyncCalculationProc(){
   calculation_mutex_.lock();
-
-  ctrl_->compute(time_);
   
-  ctrl_->franka_output(franka_qacc_); 
-  ctrl_->husky_output(husky_qacc_); 
+  ctrl_->husky_update(odom_lpf_, odom_dot_lpf_, Vector2d::Zero(), wheel_vel_);
+  ctrl_->franka_update(franka_q_, dq_filtered_);
 
-  ctrl_->state(state_);
-
-  ctrl_->mass(robot_mass_);
-  // robot_mass_(4, 4) *= 6.0;
-  // robot_mass_(5, 5) *= 6.0;
-  // robot_mass_(6, 6) *= 10.0;
+  // ctrl_->compute(time_);
   
-  franka_torque_ = robot_mass_ * franka_qacc_ + robot_nle_;
+  // ctrl_->franka_output(franka_qacc_); 
+  // ctrl_->husky_output(husky_qacc_); 
 
-  MatrixXd Kd(7, 7);
-  Kd.setIdentity();
-  Kd = 2.0 * sqrt(5.0) * Kd;
-  Kd(5, 5) = 0.2;
-  Kd(4, 4) = 0.2;
-  Kd(6, 6) = 0.2; // this is practical term
-  franka_torque_ -= Kd * dq_filtered_;  
-  franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
+  // ctrl_->state(state_);
 
-  husky_qvel_ = husky_qacc_ * 0.01;//  + husky_qvel_prev_;
-  double thes_vel = 1.0;
-  if (husky_qvel_(0) > thes_vel)
-    husky_qvel_(0) = thes_vel;
-  else if (husky_qvel_(0) < -thes_vel)
-    husky_qvel_(0) = -thes_vel;
-  if (husky_qvel_(1) > thes_vel)
-    husky_qvel_(1) = thes_vel;
-  else if (husky_qvel_(1) < -thes_vel)
-    husky_qvel_(1) = -thes_vel;  
+  // ctrl_->mass(robot_mass_);
+  // // robot_mass_(4, 4) *= 6.0;
+  // // robot_mass_(5, 5) *= 6.0;
+  // // robot_mass_(6, 6) *= 10.0;
+  
+  // franka_torque_ = robot_mass_ * franka_qacc_ + robot_nle_;
+
+  // MatrixXd Kd(7, 7);
+  // Kd.setIdentity();
+  // Kd = 2.0 * sqrt(5.0) * Kd;
+  // Kd(5, 5) = 0.2;
+  // Kd(4, 4) = 0.2;
+  // Kd(6, 6) = 0.2; // this is practical term
+  // franka_torque_ -= Kd * dq_filtered_;  
+  // franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
+
+  // husky_qvel_ = husky_qacc_ * 0.01;//  + husky_qvel_prev_;
+  // double thes_vel = 1.0;
+  // if (husky_qvel_(0) > thes_vel)
+  //   husky_qvel_(0) = thes_vel;
+  // else if (husky_qvel_(0) < -thes_vel)
+  //   husky_qvel_(0) = -thes_vel;
+  // if (husky_qvel_(1) > thes_vel)
+  //   husky_qvel_(1) = thes_vel;
+  // else if (husky_qvel_(1) < -thes_vel)
+  //   husky_qvel_(1) = -thes_vel;  
     
-  husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
-  husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
-  husky_qvel_prev_ = husky_qvel_;
-  if (ctrl_->reset_control_)
-    husky_qvel_prev_.setZero();
+  // husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
+  // husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
+  // husky_qvel_prev_ = husky_qvel_;
+  // if (ctrl_->reset_control_)
+  //   husky_qvel_prev_.setZero();
 
-  this->setFrankaCommand();
-  this->setHuskyCommand();
+  // this->setFrankaCommand();
+  // this->setHuskyCommand();
 
-  this->getEEState();
-  this->getBaseState();
+  // this->getEEState();
+  // this->getBaseState();
 
   calculation_mutex_.unlock();
 }

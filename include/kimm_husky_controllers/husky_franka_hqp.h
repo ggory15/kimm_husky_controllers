@@ -90,7 +90,6 @@ namespace RobotController{
                 state_robot = state_;
             }
             bool reset_control_;
-            
 
         private:
             bool issimulation_, mode_change_, update_weight_;

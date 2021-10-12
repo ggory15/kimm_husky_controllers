@@ -159,10 +159,10 @@ class BasicHuskyFrankaController : public controller_interface::MultiInterfaceCo
 
     // Variables
     const double delta_tau_max_{20.0};
-    Vector7d dq_filtered_, franka_torque_;
+    Vector7d dq_filtered_, franka_torque_, franka_q_;
     Vector3d odom_lpf_, odom_dot_lpf_, odom_lpf_prev_, odom_dot_lpf_prev_;
     Eigen::VectorXd franka_qacc_, robot_nle_, robot_g_, husky_qvel_, husky_qacc_, husky_qvel_prev_;
-    Vector2d husky_cmd_;
+    Vector2d husky_cmd_, wheel_vel_;
     MatrixXd robot_mass_, robot_J_, robot_tau_;
     double time_;
     bool isgrasp_;
