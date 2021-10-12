@@ -51,7 +51,7 @@ namespace RobotController{
         postureTask_ = std::make_shared<TaskJointPosture>("task-posture", *robot_);
         VectorXd posture_gain(na_ -2);
         if (!issimulation_)
-        	posture_gain << 100., 100., 100., 100., 100., 100., 80.;
+        	posture_gain << 200., 200., 200., 200., 300., 300., 300.;
         else
         	posture_gain << 4000., 4000., 4000., 4000., 4000., 4000., 4000.;
         	
@@ -60,24 +60,24 @@ namespace RobotController{
 
         Vector3d ee_offset(0.0, 0, 0.0);
         VectorXd ee_gain(6);
-        ee_gain << 200., 200., 200., 100., 100., 100.;
+        ee_gain << 100., 100., 100., 400., 400., 400.;
         eeTask_ = std::make_shared<TaskSE3Equality>("task-se3", *robot_, "panda_joint7", ee_offset);
         eeTask_->Kp(ee_gain*Vector::Ones(6));
         eeTask_->Kd(2.0*eeTask_->Kp().cwiseSqrt());
         
         torqueBoundsTask_ = std::make_shared<TaskJointBounds>("task-torque-bounds", *robot_);
         Vector dq_max = 500000.0*Vector::Ones(na_);    
-        dq_max(0) = 5000.0;
-        dq_max(1) = 5000.0;
+        dq_max(0) = 500.;
+        dq_max(1) = 500.;
         Vector dq_min = -dq_max;
         torqueBoundsTask_->setJointBounds(dq_min, dq_max);
 
         mobileTask_ = std::make_shared<TaskMobileEquality>("task-mobile", *robot_, true);
-        mobileTask_->Kp(400.0*Vector3d::Ones());    
+        mobileTask_->Kp(50.0*Vector3d::Ones());    
         mobileTask_->Kd(2.0*mobileTask_->Kp().cwiseSqrt());
 
         mobileTask2_ = std::make_shared<TaskMobileEquality>("task-mobile2", *robot_, false);
-        mobileTask2_->Kp(400.0*Vector3d::Ones());
+        mobileTask2_->Kp(50.0*Vector3d::Ones());
         mobileTask2_->Kd(2.0*mobileTask2_->Kp().cwiseSqrt());
 
         // trajecotries
@@ -107,6 +107,7 @@ namespace RobotController{
         mobile_action_client_ = n_node_.serviceClient<kimm_path_planner_ros_interface::action_mobile_path>("/" + robot_node_ + "_gui/kimm_path_planner_ros_interface_server/action_mobile_path");
         joint_action_client_ = n_node_.serviceClient<kimm_joint_planner_ros_interface::action_joint_path>("/" + robot_node_ + "_gui/kimm_joint_planner_ros_interface_server/action_joint_path");
         se3_action_client_ = n_node_.serviceClient<kimm_se3_planner_ros_interface::action_se3_path>("/" + robot_node_ + "_gui/kimm_se3_planner_ros_interface_server/action_se3_path");    
+        reset_control_ = true;
     }
     
     void HuskyFrankaWrapper::franka_update(const sensor_msgs::JointState::ConstPtr& msg){
@@ -186,6 +187,7 @@ namespace RobotController{
                 trajPosture_Cubic_->setStartTime(time_);
                 trajPosture_Cubic_->setGoalSample(q_ref_);      
                             
+                reset_control_ = false;
                 mode_change_ = false;                
             }
 
@@ -211,7 +213,7 @@ namespace RobotController{
                 tsid_->addMotionTask(*postureTask_, 1e-6, 1);
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1.0, 0);
-                tsid_->addMotionTask(*mobileTask2_, 1.0, 0);
+                tsid_->addMotionTask(*mobileTask_, 1.0, 0);
 
                 //traj
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
@@ -223,8 +225,9 @@ namespace RobotController{
                 trajEE_Cubic_->setDuration(5.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(0) += 0.05;  
-                // H_ee_ref_.translation()(1) += 0.05;                              
+                H_ee_ref_.translation()(0) += 0.6;  
+                H_ee_ref_.translation()(1) -= 0.35;      
+                H_ee_ref_.translation()(2) -= 0.35;                       
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
                 H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
@@ -232,13 +235,14 @@ namespace RobotController{
                 // H_mobile_ref_.rotation().col(1) << 0, -1, 0;
                 // H_mobile_ref_.rotation().col(2) << 0, 0, 1;
                 
+                reset_control_ = false;
                 mode_change_ = false;
             }
             
             // husky
             trajMobile_Constant_->setReference(H_mobile_ref_);
             sampleMobile_ = trajMobile_Constant_->computeNext();
-            mobileTask2_->setReference(sampleMobile_);
+            //mobileTask_->setReference(sampleMobile_);
 
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
@@ -287,6 +291,7 @@ namespace RobotController{
                 }
                 postureTask_->Kp(Kp);
                 postureTask_->Kd(Kd);
+                reset_control_ = false;
             }           
 
             samplePosture_.pos.setZero(na_-2);
@@ -350,9 +355,10 @@ namespace RobotController{
                 node_index_ = 0;
 
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                trajPosture_Cubic_->setDuration(1.0);
+                trajPosture_Cubic_->setDuration(0.1);
                 trajPosture_Cubic_->setStartTime(time_);
                 trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));    
+                reset_control_ = false;
             }           
 
             Vector3d goal_path; 
@@ -370,7 +376,7 @@ namespace RobotController{
             if (node_index_ < node_num_){
                 if (prev_node_ != node_index_){                   
                     trajMobile_Cubic_->setStartTime(time_);
-                    trajMobile_Cubic_->setDuration(0.001);
+                    trajMobile_Cubic_->setDuration(0.1);
                     trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
                     trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
 
@@ -429,14 +435,16 @@ namespace RobotController{
                 trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));  
 
                 mode_change_ = false;
+                reset_control_ = false;
             }
-            if (stime_ + 2.0 > time_){
-                state_.torque_(0) = 5.0;
-                state_.torque_(1) = 5.0;
+            if (stime_ + 5.0 > time_){
+                state_.torque_(0) = 50.;
+                state_.torque_(1) = 50.;
             }
             else{
                 state_.torque_(0) = 0.0;
                 state_.torque_(1) = 0.0;
+                reset_control_ = true;
             }
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
@@ -465,14 +473,16 @@ namespace RobotController{
                 trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));  
 
                 mode_change_ = false;
+                reset_control_ = false;
             }
-            if (stime_ + 2.0 > time_){
-                state_.torque_(0) = -5.0;
-                state_.torque_(1) = -5.0;
+            if (stime_ + 5.0 > time_){
+                state_.torque_(0) = -50.;
+                state_.torque_(1) = -50.;
             }
             else{
                 state_.torque_(0) = 0.0;
                 state_.torque_(1) = 0.0;
+                reset_control_ = true;
             }
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
@@ -501,7 +511,7 @@ namespace RobotController{
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
 
                 if (!action_se3_srv_.response.iswholebody.data){
-                    tsid_->addMotionTask(*mobileTask_, 1, 0);
+                    tsid_->addMotionTask(*mobileTask2_, 1, 0);
                     trajMobile_Cubic_->setStartTime(time_);
                     trajMobile_Cubic_->setDuration(0.001);
                     trajMobile_Cubic_->setGoalSample(robot_->getMobilePosition(data_, 5));
@@ -510,6 +520,7 @@ namespace RobotController{
 
                 mode_change_ = false;
                 update_weight_ = false;
+                reset_control_ = false;
                 stime_ = time_;
 
                 prev_node_ = -1;
@@ -593,7 +604,7 @@ namespace RobotController{
             if (!action_se3_srv_.response.iswholebody.data){
                 trajMobile_Cubic_->setCurrentTime(time_);
                 sampleMobile_ = trajMobile_Cubic_->computeNext();
-                mobileTask_->setReference(sampleMobile_);
+                mobileTask2_->setReference(sampleMobile_);
             }
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
             const HQPOutput & sol = solver_->solve(HQPData);

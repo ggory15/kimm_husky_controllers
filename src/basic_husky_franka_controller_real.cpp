@@ -17,10 +17,10 @@ bool BasicHuskyFrankaController::init(hardware_interface::RobotHW* robot_hw, ros
 {
 
   node_handle.getParam("/robot_group", group_name_);
-  husky_ctrl_pub_.init(node_handle, "/" + group_name_ + "/husky/husky_velocity_controller/cmd_vel", 4);
+  husky_ctrl_pub_.init(node_handle, "/" + group_name_ + "/husky/cmd_vel", 4);
   
   ctrl_type_sub_ = node_handle.subscribe("/" + group_name_ + "/real_robot/ctrl_type", 1, &BasicHuskyFrankaController::ctrltypeCallback, this);
-  odom_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky/husky_velocity_controller/odom", 1, &BasicHuskyFrankaController::odomCallback, this);
+  odom_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky/odometry/filtered", 1, &BasicHuskyFrankaController::odomCallback, this);
   husky_state_msg_.position.resize(4);
   husky_state_msg_.velocity.resize(4);
   husky_state_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky/joint_states", 1, &BasicHuskyFrankaController::huskystateCallback, this);
@@ -188,6 +188,7 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   odom_lpf_(0) = this->lowpassFilter(0.001, odom_msg_.pose.pose.position.x, odom_lpf_prev_(0), 100);
   odom_lpf_(1) = this->lowpassFilter(0.001, odom_msg_.pose.pose.position.y, odom_lpf_prev_(1), 100);
   odom_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.pose.pose.orientation.z, odom_lpf_prev_(2), 100);
+  
   odom_dot_lpf_(0) = this->lowpassFilter(0.001, odom_msg_.twist.twist.linear.x, odom_dot_lpf_prev_(0), 100);
   odom_dot_lpf_(1) = this->lowpassFilter(0.001, odom_msg_.twist.twist.linear.y, odom_dot_lpf_prev_(1), 100);
   odom_dot_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.twist.twist.angular.z, odom_dot_lpf_prev_(2), 100);
@@ -198,7 +199,6 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   Vector2d wheel_vel;
   wheel_vel(0) = husky_state_msg_.velocity[1]; // left vel
   wheel_vel(1) = husky_state_msg_.velocity[0]; // right vel (not use.)
-  
 
   tf::Transform transform;
   transform.setOrigin( tf::Vector3(odom_lpf_(0), odom_lpf_(1), 0.0 ));
@@ -223,37 +223,83 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
 
   // HQP thread
   
-  if (calculation_mutex_.try_lock())
-  {
-    calculation_mutex_.unlock();
-    if (async_calculation_thread_.joinable())
-      async_calculation_thread_.join();
+  // if (calculation_mutex_.try_lock())
+  // {
+  //   calculation_mutex_.unlock();
+  //   if (async_calculation_thread_.joinable())
+  //     async_calculation_thread_.join();
 
-    async_calculation_thread_ = std::thread(&BasicHuskyFrankaController::asyncCalculationProc, this);
-  }
+  //   async_calculation_thread_ = std::thread(&BasicHuskyFrankaController::asyncCalculationProc, this);
+  // }
 
-  ros::Rate r(30000);
-  for (int i = 0; i < 9; i++)
-  {
-    r.sleep();
-    if (calculation_mutex_.try_lock())
-    {
-      calculation_mutex_.unlock();
-      if (async_calculation_thread_.joinable())
-        async_calculation_thread_.join();
-      break;
-    }
-  }
+  // ros::Rate r(30000);
+  // for (int i = 0; i < 9; i++)
+  // {
+  //   r.sleep();
+  //   if (calculation_mutex_.try_lock())
+  //   {
+  //     calculation_mutex_.unlock();
+  //     if (async_calculation_thread_.joinable())
+  //       async_calculation_thread_.join();
+  //     break;
+  //   }
+  // }
   
-  if (print_rate_trigger_())
-  {
-    ROS_INFO("--------------------------------------------------");
-    ROS_INFO_STREAM("franka_torque_ :" << franka_torque_.transpose());
-    ROS_INFO_STREAM("husky_cmd_ :" << husky_cmd_.transpose());
-  }
+  ctrl_->compute(time_);
   
-  franka_torque_.setZero();
-  husky_cmd_.setZero();
+  ctrl_->franka_output(franka_qacc_); 
+  ctrl_->husky_output(husky_qacc_); 
+
+  ctrl_->state(state_);
+
+ // ctrl_->mass(robot_mass_);
+  robot_mass_(4, 4) *= 6.0;
+  robot_mass_(5, 5) *= 6.0;
+  robot_mass_(6, 6) *= 10.0;
+  
+  franka_torque_ = robot_mass_ * franka_qacc_ + robot_nle_;
+
+  MatrixXd Kd(7, 7);
+  Kd.setIdentity();
+  Kd = 2.0 * sqrt(5.0) * Kd;
+  Kd(5, 5) = 0.2;
+  Kd(4, 4) = 0.2;
+  Kd(6, 6) = 0.2; // this is practical term
+  franka_torque_ -= Kd * dq_filtered_;  
+  franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
+
+  husky_qvel_ = husky_qacc_ * 0.01;//  + husky_qvel_prev_;
+  double thes_vel = 1.0;
+  if (husky_qvel_(0) > thes_vel)
+    husky_qvel_(0) = thes_vel;
+  else if (husky_qvel_(0) < -thes_vel)
+    husky_qvel_(0) = -thes_vel;
+  if (husky_qvel_(1) > thes_vel)
+    husky_qvel_(1) = thes_vel;
+  else if (husky_qvel_(1) < -thes_vel)
+    husky_qvel_(1) = -thes_vel;  
+    
+  husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
+  husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
+  husky_qvel_prev_ = husky_qvel_;
+  if (ctrl_->reset_control_)
+    husky_qvel_prev_.setZero();
+
+  this->setFrankaCommand();
+  this->setHuskyCommand();
+
+  this->getEEState();
+  this->getBaseState();
+
+  // if (print_rate_trigger_())
+  // {
+  //   ROS_INFO("--------------------------------------------------");
+  //   ROS_INFO_STREAM("franka_torque_ :" << franka_torque_.transpose());
+  //   ROS_INFO_STREAM("husky_cmd_ :" << husky_cmd_.transpose());
+  // }
+  
+ // franka_torque_.setZero();
+ // husky_cmd_.setZero();
 
   for (int i = 0; i < 7; i++)
     joint_handles_[i].setCommand(franka_torque_(i));
@@ -301,6 +347,7 @@ void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr 
     
     if (msg->data != 899){
         int data = msg->data;
+        husky_qvel_prev_.setZero();
         ctrl_->ctrl_update(data);
     }
     else {
@@ -337,38 +384,43 @@ void BasicHuskyFrankaController::asyncCalculationProc(){
   ctrl_->state(state_);
 
   ctrl_->mass(robot_mass_);
-  robot_mass_(4, 4) *= 6.0;
-  robot_mass_(5, 5) *= 6.0;
-  robot_mass_(6, 6) *= 10.0;
+  // robot_mass_(4, 4) *= 6.0;
+  // robot_mass_(5, 5) *= 6.0;
+  // robot_mass_(6, 6) *= 10.0;
   
   franka_torque_ = robot_mass_ * franka_qacc_ + robot_nle_;
 
   MatrixXd Kd(7, 7);
   Kd.setIdentity();
   Kd = 2.0 * sqrt(5.0) * Kd;
-  Kd(5, 5) = 0.5;
-  Kd(4, 4) = 0.5;
-  Kd(6, 6) = 0.5; // this is practical term
- // franka_torque_ -= Kd * dq_filtered_;  
+  Kd(5, 5) = 0.2;
+  Kd(4, 4) = 0.2;
+  Kd(6, 6) = 0.2; // this is practical term
+  franka_torque_ -= Kd * dq_filtered_;  
   franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
 
-  husky_qvel_ = husky_qacc_ * 0.001 + husky_qvel_prev_;
+  husky_qvel_ = husky_qacc_ * 0.01;//  + husky_qvel_prev_;
+  double thes_vel = 1.0;
+  if (husky_qvel_(0) > thes_vel)
+    husky_qvel_(0) = thes_vel;
+  else if (husky_qvel_(0) < -thes_vel)
+    husky_qvel_(0) = -thes_vel;
+  if (husky_qvel_(1) > thes_vel)
+    husky_qvel_(1) = thes_vel;
+  else if (husky_qvel_(1) < -thes_vel)
+    husky_qvel_(1) = -thes_vel;  
+    
   husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
   husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
   husky_qvel_prev_ = husky_qvel_;
+  if (ctrl_->reset_control_)
+    husky_qvel_prev_.setZero();
 
   this->setFrankaCommand();
   this->setHuskyCommand();
 
   this->getEEState();
   this->getBaseState();
-    
-/*
-  if (ctrl_->ctrltype() != 0)
-       UpdateMob();
-  else
-      InitMob();
-*/  
 
   calculation_mutex_.unlock();
 }
@@ -438,6 +490,7 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
           cout << " " << endl;
           cout << "Gravity mode" << endl;
           cout << " " << endl;
+          husky_qvel_prev_.setZero();
           break;
       case 'h': //home
           msg = 1;
@@ -445,6 +498,7 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
           cout << " " << endl;
           cout << "Initialization" << endl;
           cout << " " << endl;
+          husky_qvel_prev_.setZero();
           break;
       case 'a': //home
           msg = 2;
@@ -452,6 +506,7 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
           cout << " " << endl;
           cout << "Move EE with wholebody Motion" << endl;
           cout << " " << endl;
+          husky_qvel_prev_.setZero();
           break;    
       case 's': //home
           msg = 3;
@@ -459,6 +514,7 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
           cout << " " << endl;
           cout << "Move EE with wholebody Motion" << endl;
           cout << " " << endl;
+          husky_qvel_prev_.setZero();
           break;    
       case 'd': //home
           msg = 4;
@@ -466,6 +522,7 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
           cout << " " << endl;
           cout << "Move EE with wholebody Motion" << endl;
           cout << " " << endl;
+          husky_qvel_prev_.setZero();
           break;   
       case 'z': //grasp
           msg = 899;
