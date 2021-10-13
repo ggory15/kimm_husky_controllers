@@ -14,26 +14,28 @@ int main(int argc, char **argv)
     ros::Rate loop_rate(1000);
 
     // Robot Wapper
-    string group_name;
+    
     n_node.getParam("/robot_group", group_name);    
     ctrl_ = new RobotController::HuskyFrankaWrapper(group_name, true, n_node);
     ctrl_->initialize();
 
     // mujoco sub
-    ros::Subscriber jointState = n_node.subscribe("/mujoco_ros_interface/joint_states", 5, &JointStateCallback, ros::TransportHints().tcpNoDelay(true));    
-    ros::Subscriber mujoco_command_sub = n_node.subscribe("/mujoco_ros_interface/sim_command_sim2con", 5, &simCommandCallback, ros::TransportHints().tcpNoDelay(true));
-    ros::Subscriber mujoco_time_sub = n_node.subscribe("/mujoco_ros_interface/sim_time", 1, &simTimeCallback, ros::TransportHints().tcpNoDelay(true));
-    ros::Subscriber ctrl_type_sub = n_node.subscribe("/mujoco_ros_interface/ctrl_type", 1, &ctrltypeCallback, ros::TransportHints().tcpNoDelay(true));
+    ros::Subscriber jointState = n_node.subscribe("mujoco_ros/mujoco_ros_interface/joint_states", 5, &JointStateCallback, ros::TransportHints().tcpNoDelay(true));    
+    ros::Subscriber mujoco_command_sub = n_node.subscribe("mujoco_ros/mujoco_ros_interface/sim_command_sim2con", 5, &simCommandCallback, ros::TransportHints().tcpNoDelay(true));
+    ros::Subscriber mujoco_time_sub = n_node.subscribe("mujoco_ros/mujoco_ros_interface/sim_time", 1, &simTimeCallback, ros::TransportHints().tcpNoDelay(true));
+    ros::Subscriber ctrl_type_sub = n_node.subscribe("mujoco_ros/mujoco_ros_interface/ctrl_type", 1, &ctrltypeCallback, ros::TransportHints().tcpNoDelay(true));
 
     // mujoco pub
-    mujoco_command_pub_ = n_node.advertise<std_msgs::String>("/mujoco_ros_interface/sim_command_con2sim", 5);
-    robot_command_pub_ = n_node.advertise<mujoco_ros_msgs::JointSet>("/mujoco_ros_interface/joint_set", 5);
+    mujoco_command_pub_ = n_node.advertise<std_msgs::String>("mujoco_ros/mujoco_ros_interface/sim_command_con2sim", 5);
+    robot_command_pub_ = n_node.advertise<mujoco_ros_msgs::JointSet>("mujoco_ros/mujoco_ros_interface/joint_set", 5);
 
     // robot pub
-    base_state_pub_ = n_node.advertise<sensor_msgs::JointState>("/mujoco_ros_interface/base_state", 5);
-    ee_state_pub_ = n_node.advertise<geometry_msgs::Transform>("/mujoco_ros_interface/ee_state", 5);
+    base_state_pub_ = n_node.advertise<sensor_msgs::JointState>("mujoco_ros/mujoco_ros_interface/base_state", 5);
+    ee_state_pub_ = n_node.advertise<geometry_msgs::Transform>("mujoco_ros/mujoco_ros_interface/ee_state", 5);
     br_ = new tf::TransformBroadcaster();
-    husky_odom_pub_ = n_node.advertise<visualization_msgs::Marker>("husky_odom", 1);
+
+    
+    husky_odom_pub_ = n_node.advertise<visualization_msgs::Marker>("/husky_odom", 1);
 
     // msg 
     robot_command_msg_.torque.resize(13); // gripper(2) + wheels(4) + robot (7)
@@ -107,15 +109,23 @@ void simTimeCallback(const std_msgs::Float32ConstPtr &msg){
 }
 
 void JointStateCallback(const sensor_msgs::JointState::ConstPtr& msg){
-    ctrl_->franka_update(msg);
-    ctrl_->husky_update(msg);
+    
+    sensor_msgs::JointState msg_tmp;
+    msg_tmp = *msg;
+    if (group_name == "ns0")
+        msg_tmp.position[1] = msg_tmp.position[1] + 2.0;
+
+    ctrl_->franka_update(msg_tmp);
+    ctrl_->husky_update(msg_tmp);
 
     tf::Transform transform;
-    transform.setOrigin( tf::Vector3(msg->position[0], msg->position[1], msg->position[2]) );
-    tf::Quaternion q(msg->position[4], msg->position[5], msg->position[6], msg->position[3]);
+    transform.setOrigin( tf::Vector3(msg_tmp.position[0], msg_tmp.position[1], msg_tmp.position[2]) );
+    tf::Quaternion q(msg_tmp.position[4], msg_tmp.position[5], msg_tmp.position[6], msg_tmp.position[3]);
     //tf::Quaternion q(0, 0, 0, 1);
     transform.setRotation(q);
-    br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "base_link"));
+
+    br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", group_name + "_rviz_base_link"));
+
 }
 
 void ctrltypeCallback(const std_msgs::Int16ConstPtr &msg){

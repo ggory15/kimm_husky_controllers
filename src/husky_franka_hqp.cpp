@@ -110,11 +110,11 @@ namespace RobotController{
         reset_control_ = true;
     }
     
-    void HuskyFrankaWrapper::franka_update(const sensor_msgs::JointState::ConstPtr& msg){
+    void HuskyFrankaWrapper::franka_update(const sensor_msgs::JointState& msg){
         assert(issimulation_);
         for (int i=0; i< 7; i++){ 
-            state_.q_(i+5) = msg->position[i+11];
-            state_.v_(i+5) = msg->velocity[i+10];
+            state_.q_(i+5) = msg.position[i+11];
+            state_.v_(i+5) = msg.velocity[i+10];
         }
     }
     void HuskyFrankaWrapper::franka_update(const Vector7d& q, const Vector7d& qdot){
@@ -122,22 +122,22 @@ namespace RobotController{
         state_.q_.tail(7) = q;
         state_.v_.tail(7) = qdot;
     }
-    void HuskyFrankaWrapper::husky_update(const sensor_msgs::JointState::ConstPtr& msg){
+    void HuskyFrankaWrapper::husky_update(const sensor_msgs::JointState& msg){
         assert(issimulation_);
         for (int i=0; i<2; i++){
-            state_.q_(i) = msg->position[i];
-            state_.v_(i) = msg->velocity[i];
+            state_.q_(i) = msg.position[i];
+            state_.v_(i) = msg.velocity[i];
         }
     
-        double theta = atan2(2.* (msg->position[5] * msg->position[4] + msg->position[6] * msg->position[3]), 1- 2.*(pow( msg->position[6], 2) + pow(msg->position[5], 2)));
+        double theta = atan2(2.* (msg.position[5] * msg.position[4] + msg.position[6] * msg.position[3]), 1- 2.*(pow( msg.position[6], 2) + pow(msg.position[5], 2)));
         state_.q_(2) = theta;       
-        state_.v_(2) = msg->velocity[5];
+        state_.v_(2) = msg.velocity[5];
         
         // only for front wheel (not used)
-        state_.q_(3) = msg->position[7];
-        state_.q_(4) = msg->position[8];
-        state_.v_(3) = msg->velocity[6];
-        state_.v_(4) = msg->velocity[7];
+        state_.q_(3) = msg.position[7];
+        state_.q_(4) = msg.position[8];
+        state_.v_(3) = msg.velocity[6];
+        state_.v_(4) = msg.velocity[7];
     }
     void HuskyFrankaWrapper::husky_update(const Vector3d& base_pos, const Vector3d& base_vel, const Vector2d& wheel_pos, const Vector2d& wheel_vel){
         assert(!issimulation_);

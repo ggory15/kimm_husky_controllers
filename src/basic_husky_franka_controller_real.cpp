@@ -190,6 +190,9 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   odom_lpf_(1) = this->lowpassFilter(0.001, odom_msg_.pose.pose.position.y, odom_lpf_prev_(1), 100);
   odom_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.pose.pose.orientation.z, odom_lpf_prev_(2), 100);
   
+  if (group_name_ == "ns0")
+    odom_lpf_(1) += 2.0;
+
   odom_dot_lpf_(0) = this->lowpassFilter(0.001, odom_msg_.twist.twist.linear.x, odom_dot_lpf_prev_(0), 100);
   odom_dot_lpf_(1) = this->lowpassFilter(0.001, odom_msg_.twist.twist.linear.y, odom_dot_lpf_prev_(1), 100);
   odom_dot_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.twist.twist.angular.z, odom_dot_lpf_prev_(2), 100);
@@ -205,8 +208,7 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   tf::Quaternion q;
   q.setRPY(0, 0, odom_lpf_(2));
   transform.setRotation(q);
-  br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", "rviz_base_link"));
-
+  br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", group_name_ + "_rviz_base_link"));
   
   robot_state_msg_.position[0] = husky_state_msg_.position[1];
   robot_state_msg_.position[1] = husky_state_msg_.position[0];

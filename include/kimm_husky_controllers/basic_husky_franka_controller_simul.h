@@ -17,6 +17,10 @@
 // Tf
 #include <tf/transform_broadcaster.h>
 
+typedef Eigen::Matrix<double, 7, 1> Vector7d;
+typedef Eigen::Matrix<double, 7, 7> Matrix7d;
+typedef Eigen::Matrix<double, 9, 1> Vector9d;
+
 ros::Publisher mujoco_command_pub_;
 ros::Publisher robot_command_pub_;
 ros::Publisher ee_state_pub_, base_state_pub_, husky_odom_pub_;
@@ -29,7 +33,7 @@ double mujoco_time_, time_;
 bool isgrasp_;
 Eigen::VectorXd franka_qacc_, husky_qvel_, robot_nle_, robot_g_, franka_torque_;
 Eigen::MatrixXd robot_mass_, robot_J_;
-
+string group_name;
 
 RobotController::HuskyFrankaWrapper * ctrl_;
 Mob mob_;

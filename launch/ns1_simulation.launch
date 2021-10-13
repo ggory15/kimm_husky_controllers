@@ -1,7 +1,11 @@
 <launch>
   <arg name="pub_mode" default="false"/>
   <arg name="controller" default="true"/>
-  <param name="robot_group" type="string" value="ns0"/>
+
+  <param name="robot_group" type="string" value="ns1"/>
+  <group ns ="ns1">
+
+
   <param name="issimulation" type="bool" value="true"/>
   
   <node name="mujoco_ros" pkg="mujoco_ros" type="mujoco_ros" required="true" respawn="false" output="screen">
@@ -13,7 +17,7 @@
     <node name="kimm_husky_controllers_simulation" pkg="kimm_husky_controllers" args="-keyboard" type="kimm_husky_controllers_simulation" output="screen">
   </node>
 
-  <group ns ="ns0">
+  
     <param name="robot_urdf_path" type="string" value="$(find husky_description)"/>
     <param name="robot_urdf" type="string" value="/husky_single/husky_panda_hand_free.urdf"/>
   </group>

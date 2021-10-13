@@ -65,10 +65,10 @@ namespace RobotController{
 
             void initialize();
             void ctrl_update(const int& ); // msg for chaning controller
-            void franka_update(const sensor_msgs::JointState::ConstPtr&); // franka state update
+            void franka_update(const sensor_msgs::JointState&); // franka state update
             void franka_update(const Vector7d&, const Vector7d&); // franka state update
 
-            void husky_update(const sensor_msgs::JointState::ConstPtr&); // husky state update
+            void husky_update(const sensor_msgs::JointState&); // husky state update
             void husky_update(const Vector3d&, const Vector3d&, const Vector2d&, const Vector2d&); // husky state update
 
             void compute(const double &); // computation by hqp controller
