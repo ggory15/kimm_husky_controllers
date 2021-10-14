@@ -92,7 +92,7 @@ namespace RobotController{
             bool reset_control_;
 
         private:
-            bool issimulation_, mode_change_, update_weight_;
+            bool issimulation_, mode_change_, update_weight_, planner_res_;
             double stime_, time_, node_index_, node_num_, prev_node_;
             std::string robot_node_;
             State state_;

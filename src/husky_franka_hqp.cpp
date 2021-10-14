@@ -108,6 +108,7 @@ namespace RobotController{
         joint_action_client_ = n_node_.serviceClient<kimm_joint_planner_ros_interface::action_joint_path>("/" + robot_node_ + "_gui/kimm_joint_planner_ros_interface_server/action_joint_path");
         se3_action_client_ = n_node_.serviceClient<kimm_se3_planner_ros_interface::action_se3_path>("/" + robot_node_ + "_gui/kimm_se3_planner_ros_interface_server/action_se3_path");    
         reset_control_ = true;
+        planner_res_ = false;
     }
     
     void HuskyFrankaWrapper::franka_update(const sensor_msgs::JointState& msg){
@@ -317,160 +318,174 @@ namespace RobotController{
         if (ctrl_mode_ == 900){ // joint ctrl
             if (mode_change_){
                 action_joint_srv_.request.test.data = true;
-                joint_action_client_.call(action_joint_srv_);
-                
-                node_num_ = action_joint_srv_.response.res_traj.size() -1;
-                
-                tsid_->removeTask("task-mobile");
-                tsid_->removeTask("task-mobile2");
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
+                planner_res_ = joint_action_client_.call(action_joint_srv_);
 
-                tsid_->addMotionTask(*postureTask_, 1e-5, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                if (planner_res_){
+                    tsid_->removeTask("task-mobile");
+                    tsid_->removeTask("task-mobile2");
+                    tsid_->removeTask("task-se3");
+                    tsid_->removeTask("task-posture");
+                    tsid_->removeTask("task-torque-bounds");
 
-                mode_change_ = false;
-                update_weight_ = false;
-                stime_ = time_;
+                    tsid_->addMotionTask(*postureTask_, 1e-5, 1);
+                    tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                    
+                    VectorXd Kp, Kd;
+                    Kp.setOnes(na_-2);
+                    Kd.setOnes(na_-2);
 
-                prev_node_ = -1;
-                node_index_ = 0;
-                q_ref_ = state_.q_.tail(na_-2); 
-                VectorXd Kp, Kd;
-                Kp.setOnes(na_-2);
-                Kd.setOnes(na_-2);
-                for (int i=0; i<na_-2; i++){
-                    Kp(i) = action_joint_srv_.response.kp[i];
-                    Kd(i) = action_joint_srv_.response.kv[i];
+                    for (int i=0; i<na_-2; i++){
+                        Kp(i) = action_joint_srv_.response.kp[i];
+                        Kd(i) = action_joint_srv_.response.kv[i];
+                        q_ref_(i) = action_joint_srv_.response.target_joint[0].position[i];
+                    }
+                    
+                    if (action_joint_srv_.response.traj_type == 1 || action_joint_srv_.response.traj_type == 2){
+                        trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                        trajPosture_Cubic_->setDuration(action_joint_srv_.response.duration);
+                        trajPosture_Cubic_->setStartTime(time_);
+                        trajPosture_Cubic_->setGoalSample(q_ref_); 
+                    }
+                    
+                    mode_change_ = false;
+                    update_weight_ = false;
+                    stime_ = time_;
+
+                    postureTask_->Kp(Kp);
+                    postureTask_->Kd(Kd);
+                    reset_control_ = false;
                 }
-                postureTask_->Kp(Kp);
-                postureTask_->Kd(Kd);
-                reset_control_ = false;
+                else{                    
+                    mode_change_ = false;
+                }
             }           
+            if (planner_res_){
+                if (action_joint_srv_.response.traj_type == 0){
+                    samplePosture_.pos.setZero(na_-2);
+                    samplePosture_.vel.setZero(na_-2);
+                    samplePosture_.acc.setZero(na_-2);
+                    samplePosture_.pos = q_ref_;                    
+                } 
+                else{
+                    trajPosture_Cubic_->setCurrentTime(time_);
+                    samplePosture_ = trajPosture_Cubic_->computeNext();
+                    postureTask_->setReference(samplePosture_);     
+                }
+                const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
+                const HQPOutput & sol = solver_->solve(HQPData);
 
-            samplePosture_.pos.setZero(na_-2);
-            samplePosture_.vel.setZero(na_-2);
-            samplePosture_.acc.setZero(na_-2);
-           
-            if (node_num_ == -1){
-                samplePosture_.pos = q_ref_;
+                state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
+                state_.torque_.head(2).setZero();
             }
             else{
-                if (node_index_ < node_num_){
-                    if (prev_node_ != node_index_){      
-                        for (int i=0; i<na_-2; i++)
-                            samplePosture_.pos(i) = action_joint_srv_.response.res_traj[node_index_].position[i];
-                        node_index_ += 1;      
-                    }           
-                }
-                else{
-                    for (int i=0; i<na_-2; i++)
-                        samplePosture_.pos(i) = action_joint_srv_.response.res_traj[node_num_].position[i];
-                }
+                state_.torque_.setZero();
             }
-            postureTask_->setReference(samplePosture_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
-            const HQPOutput & sol = solver_->solve(HQPData);
-
-            state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
-            state_.torque_.head(2).setZero();
         }
         if (ctrl_mode_ == 901){ // base ctrl
             if (mode_change_){
                 action_mobile_srv_.request.test.data = true;
-                mobile_action_client_.call(action_mobile_srv_);
+                planner_res_ = mobile_action_client_.call(action_mobile_srv_);
                 
-                node_num_ = action_mobile_srv_.response.mobile_path.points.size() -1;
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-                tsid_->removeTask("task-mobile");
-                tsid_->removeTask("task-mobile2");
-                tsid_->removeTask("task-se3");
+                if (planner_res_){
+                    node_num_ = action_mobile_srv_.response.mobile_path.points.size() -1;
+                    tsid_->removeTask("task-posture");
+                    tsid_->removeTask("task-torque-bounds");
+                    tsid_->removeTask("task-mobile");
+                    tsid_->removeTask("task-mobile2");
+                    tsid_->removeTask("task-se3");
 
-                H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
-                double theta = atan2(-H_mobile_ref_.rotation()(0, 1), H_mobile_ref_.rotation()(0,0));
-                
-                tsid_->addMotionTask(*mobileTask_, 0.1, 1);
-                tsid_->addMotionTask(*mobileTask2_, 1, 1);
-                tsid_->addMotionTask(*postureTask_, 1e-5, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
+                    double theta = atan2(-H_mobile_ref_.rotation()(0, 1), H_mobile_ref_.rotation()(0,0));
+                    
+                    tsid_->addMotionTask(*mobileTask_, 0.1, 1);
+                    tsid_->addMotionTask(*mobileTask2_, 1, 1);
+                    tsid_->addMotionTask(*postureTask_, 1e-5, 1);
+                    tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
 
-                trajMobile_Cubic_->setStartTime(time_);
-                trajMobile_Cubic_->setDuration(0.001);
-                trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
-                trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
-
-                mode_change_ = false;
-                update_weight_ = false;
-                stime_ = time_;
-
-                prev_node_ = -1;
-                node_index_ = 0;
-
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                trajPosture_Cubic_->setDuration(0.1);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));    
-                reset_control_ = false;
-            }           
-
-            Vector3d goal_path; 
-            if (node_num_ != -1){
-                goal_path << action_mobile_srv_.response.mobile_path.points[node_index_].x, action_mobile_srv_.response.mobile_path.points[node_index_].y, action_mobile_srv_.response.mobile_path.points[node_index_].theta; 
-                H_mobile_ref_.translation().head(2) = goal_path.head(2);
-
-                H_mobile_ref_.rotation().setIdentity();
-                H_mobile_ref_.rotation()(0, 0) = cos(goal_path(2));
-                H_mobile_ref_.rotation()(0, 1) = -sin(goal_path(2));
-                H_mobile_ref_.rotation()(1, 0) = sin(goal_path(2));
-                H_mobile_ref_.rotation()(1, 1) = cos(goal_path(2));
-            }            
-           
-            if (node_index_ < node_num_){
-                if (prev_node_ != node_index_){                   
                     trajMobile_Cubic_->setStartTime(time_);
                     trajMobile_Cubic_->setDuration(0.001);
                     trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
                     trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
 
-                    prev_node_ = node_index_;
+                    mode_change_ = false;
+                    update_weight_ = false;
                     stime_ = time_;
+
+                    prev_node_ = -1;
+                    node_index_ = 0;
+
+                    trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                    trajPosture_Cubic_->setDuration(0.1);
+                    trajPosture_Cubic_->setStartTime(time_);
+                    trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));    
+                    reset_control_ = false;
+                }
+                else{
+                    mode_change_ = false;
+                }
+            }           
+            if (planner_res_){
+                Vector3d goal_path; 
+                if (node_num_ != -1){
+                    goal_path << action_mobile_srv_.response.mobile_path.points[node_index_].x, action_mobile_srv_.response.mobile_path.points[node_index_].y, action_mobile_srv_.response.mobile_path.points[node_index_].theta; 
+                    H_mobile_ref_.translation().head(2) = goal_path.head(2);
+
+                    H_mobile_ref_.rotation().setIdentity();
+                    H_mobile_ref_.rotation()(0, 0) = cos(goal_path(2));
+                    H_mobile_ref_.rotation()(0, 1) = -sin(goal_path(2));
+                    H_mobile_ref_.rotation()(1, 0) = sin(goal_path(2));
+                    H_mobile_ref_.rotation()(1, 1) = cos(goal_path(2));
+                }            
+            
+                if (node_index_ < node_num_){
+                    if (prev_node_ != node_index_){                   
+                        trajMobile_Cubic_->setStartTime(time_);
+                        trajMobile_Cubic_->setDuration(0.001);
+                        trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
+                        trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
+
+                        prev_node_ = node_index_;
+                        stime_ = time_;
+                    }
+
+                    if (stime_ + 0.1 <= time_)
+                        node_index_ += 1;              
+                }
+                else{
+                    if (!update_weight_){
+                        tsid_->updateTaskWeight("task-mobile", 1.);
+                        tsid_->updateTaskWeight("task-mobile2", 0.01);
+
+                        trajMobile_Cubic_->setStartTime(time_);
+                        trajMobile_Cubic_->setDuration(0.1);
+                        trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
+                        trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
+
+                        update_weight_ = true;
+                    }         
                 }
 
-                if (stime_ + 0.1 <= time_)
-                    node_index_ += 1;              
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+
+                mobileTask2_-> setReference(sampleMobile_);
+                mobileTask_ -> setReference(sampleMobile_);
+            
+                trajPosture_Cubic_->setCurrentTime(time_);
+                samplePosture_ = trajPosture_Cubic_->computeNext();
+                postureTask_->setReference(samplePosture_);
+
+                const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
+                const HQPOutput & sol = solver_->solve(HQPData);
+
+                state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
+                state_.torque_.head(2) = tsid_->getAccelerations(solver_->solve(HQPData)).head(2);
+                if (time_ > stime_ + node_num_ * 0.1 + 3.0)
+                    state_.torque_.head(2).setZero();
             }
             else{
-                if (!update_weight_){
-                    tsid_->updateTaskWeight("task-mobile", 1.);
-                    tsid_->updateTaskWeight("task-mobile2", 0.01);
-
-                    trajMobile_Cubic_->setStartTime(time_);
-                    trajMobile_Cubic_->setDuration(0.1);
-                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
-                    trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
-
-                    update_weight_ = true;
-                }         
+                state_.torque_.setZero();
             }
-
-            trajMobile_Cubic_->setCurrentTime(time_);
-            sampleMobile_ = trajMobile_Cubic_->computeNext();
-
-            mobileTask2_-> setReference(sampleMobile_);
-            mobileTask_ -> setReference(sampleMobile_);
-           
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
-            const HQPOutput & sol = solver_->solve(HQPData);
-
-            state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
-            state_.torque_.head(2) = tsid_->getAccelerations(solver_->solve(HQPData)).head(2);
         }
         if (ctrl_mode_ == 902){ //base forward
             if (mode_change_){
@@ -551,121 +566,104 @@ namespace RobotController{
         if (ctrl_mode_ == 904){ // se3 ctrl
             if (mode_change_){
                 action_se3_srv_.request.test.data = true;
-                se3_action_client_.call(action_se3_srv_);
-               
-                node_num_ = action_se3_srv_.response.res_traj.size() -1;
+                planner_res_ = se3_action_client_.call(action_se3_srv_);
 
-                tsid_->removeTask("task-mobile");
-                tsid_->removeTask("task-mobile2");
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
+                if (planner_res_){
+                    tsid_->removeTask("task-mobile");
+                    tsid_->removeTask("task-mobile2");
+                    tsid_->removeTask("task-se3");
+                    tsid_->removeTask("task-posture");
+                    tsid_->removeTask("task-torque-bounds");
 
-                tsid_->addMotionTask(*eeTask_, 1, 1);
-                tsid_->addMotionTask(*postureTask_, 1e-5, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                    tsid_->addMotionTask(*eeTask_, 1, 1);
+                    tsid_->addMotionTask(*postureTask_, 1e-5, 1);
+                    tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
 
-                if (!action_se3_srv_.response.iswholebody.data){
-                    tsid_->addMotionTask(*mobileTask2_, 1, 0);
-                    trajMobile_Cubic_->setStartTime(time_);
-                    trajMobile_Cubic_->setDuration(0.001);
-                    trajMobile_Cubic_->setGoalSample(robot_->getMobilePosition(data_, 5));
-                    trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
-                }
+                    if (!action_se3_srv_.response.iswholebody.data){
+                        tsid_->addMotionTask(*mobileTask2_, 1, 0);
+                        trajMobile_Cubic_->setStartTime(time_);
+                        trajMobile_Cubic_->setDuration(0.001);
+                        trajMobile_Cubic_->setGoalSample(robot_->getMobilePosition(data_, 5));
+                        trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
+                    }
 
-                mode_change_ = false;
-                update_weight_ = false;
-                reset_control_ = false;
-                stime_ = time_;
+                    mode_change_ = false;
+                    reset_control_ = false;
+                    stime_ = time_;
 
-                prev_node_ = -1;
-                node_index_ = 0;
+                    H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
+                    VectorXd Kp, Kd;
+                    Kp.setOnes(6);
+                    Kd.setOnes(6);
 
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
-                VectorXd Kp, Kd;
-                Kp.setOnes(6);
-                Kd.setOnes(6);
-                for (int i=0; i<6; i++){
-                    Kp(i) = action_se3_srv_.response.kp[i];
-                    Kd(i) = action_se3_srv_.response.kv[i];
-                }
+                    SE3 t_se3_;
+                    Eigen::Quaterniond quat;
 
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                trajPosture_Cubic_->setDuration(1.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));  
+                    t_se3_.translation()(0) = action_se3_srv_.response.target_se3[0].translation.x;
+                    t_se3_.translation()(1) = action_se3_srv_.response.target_se3[0].translation.y;
+                    t_se3_.translation()(2) = action_se3_srv_.response.target_se3[0].translation.z;
+                    quat.x() = action_se3_srv_.response.target_se3[0].rotation.x;
+                    quat.y() = action_se3_srv_.response.target_se3[0].rotation.y;
+                    quat.z() = action_se3_srv_.response.target_se3[0].rotation.z;
+                    quat.w() = action_se3_srv_.response.target_se3[0].rotation.w;
+                    quat.normalize();
 
-            }           
+                    t_se3_.rotation() = quat.toRotationMatrix();
+                    
+                    for (int i=0; i<6; i++){
+                        Kp(i) = action_se3_srv_.response.kp[i];
+                        Kd(i) = action_se3_srv_.response.kv[i];
+                    }
+                    if (action_se3_srv_.response.traj_type == 1 || action_se3_srv_.response.traj_type == 2){
+                        trajEE_Cubic_->setInitSample(H_ee_ref_);
+                        trajEE_Cubic_->setDuration(action_se3_srv_.response.duration);
+                        trajEE_Cubic_->setStartTime(time_);
+                        trajEE_Cubic_->setGoalSample(t_se3_);  
+                    }
+                    else{
+                        trajEE_Constant_->setReference(t_se3_);
+                    }
 
-            sampleEE_.pos.setZero(12);
-            sampleEE_.vel.setZero(6);
-            sampleEE_.acc.setZero(6);
-            Eigen::Matrix3d rot;
-            Eigen::Quaterniond quat;
-
-            if (node_num_ == -1){
-                sampleEE_.pos.head(3) = H_ee_ref_.translation();
-                sampleEE_.pos.segment(3,3) = H_ee_ref_.rotation().col(0);
-                sampleEE_.pos.segment(6,3) = H_ee_ref_.rotation().col(1);
-                sampleEE_.pos.tail(3) = H_ee_ref_.rotation().col(2);
-            }
-            else{
-                if (node_index_ < node_num_){
-                    if (prev_node_ != node_index_){   
-                        sampleEE_.pos(0) = action_se3_srv_.response.res_traj[node_index_].translation.x;
-                        sampleEE_.pos(1) = action_se3_srv_.response.res_traj[node_index_].translation.y;
-                        sampleEE_.pos(2) = action_se3_srv_.response.res_traj[node_index_].translation.z;
-                        quat.x() = action_se3_srv_.response.res_traj[node_index_].rotation.x;
-                        quat.y() = action_se3_srv_.response.res_traj[node_index_].rotation.y;
-                        quat.z() = action_se3_srv_.response.res_traj[node_index_].rotation.z;
-                        quat.w() = action_se3_srv_.response.res_traj[node_index_].rotation.w;
-                        rot = quat.toRotationMatrix();
-
-                        sampleEE_.pos.segment(3,3) = rot.col(0);
-                        sampleEE_.pos.segment(6,3) = rot.col(1);
-                        sampleEE_.pos.tail(3) = rot.col(2);     
-                        
-                        sampleEE_.pos.segment(3,3) = H_ee_ref_.rotation().col(0);
-                        sampleEE_.pos.segment(6,3) = H_ee_ref_.rotation().col(1);
-                        sampleEE_.pos.tail(3) = H_ee_ref_.rotation().col(2);
-                        node_index_ += 1;      
-                    }           
+                    trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                    trajPosture_Cubic_->setDuration(1.0);
+                    trajPosture_Cubic_->setStartTime(time_);
+                    trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));  
                 }
                 else{
-                    sampleEE_.pos(0) = action_se3_srv_.response.res_traj[node_num_].translation.x;
-                    sampleEE_.pos(1) = action_se3_srv_.response.res_traj[node_num_].translation.y;
-                    sampleEE_.pos(2) = action_se3_srv_.response.res_traj[node_num_].translation.z;
-                    quat.x() = action_se3_srv_.response.res_traj[node_num_].rotation.x;
-                    quat.y() = action_se3_srv_.response.res_traj[node_num_].rotation.y;
-                    quat.z() = action_se3_srv_.response.res_traj[node_num_].rotation.z;
-                    quat.w() = action_se3_srv_.response.res_traj[node_num_].rotation.w;
-                    rot = quat.toRotationMatrix();
-
-                    sampleEE_.pos.segment(3,3) = rot.col(0);
-                    sampleEE_.pos.segment(6,3) = rot.col(1);
-                    sampleEE_.pos.tail(3) = rot.col(2);      
-
-                    sampleEE_.pos.segment(3,3) = H_ee_ref_.rotation().col(0);
-                    sampleEE_.pos.segment(6,3) = H_ee_ref_.rotation().col(1);
-                    sampleEE_.pos.tail(3) = H_ee_ref_.rotation().col(2);  
+                    mode_change_ = false;
                 }
-            }
-            eeTask_->setReference(sampleEE_);
-            
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-            
-            if (!action_se3_srv_.response.iswholebody.data){
-                trajMobile_Cubic_->setCurrentTime(time_);
-                sampleMobile_ = trajMobile_Cubic_->computeNext();
-                mobileTask2_->setReference(sampleMobile_);
-            }
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
-            const HQPOutput & sol = solver_->solve(HQPData);
+            }    
+            if (planner_res_){       
+                if (action_se3_srv_.response.traj_type == 0) {
+                    sampleEE_ = trajEE_Constant_->computeNext();
+                    eeTask_->setReference(sampleEE_);
+                }
+                else{
+                    trajEE_Cubic_->setCurrentTime(time_);
+                    sampleEE_ = trajEE_Cubic_->computeNext();
+                    eeTask_->setReference(sampleEE_);
+                }                
+                
+                trajPosture_Cubic_->setCurrentTime(time_);
+                samplePosture_ = trajPosture_Cubic_->computeNext();
+                postureTask_->setReference(samplePosture_);
+                
+                if (!action_se3_srv_.response.iswholebody.data){
+                    trajMobile_Cubic_->setCurrentTime(time_);
+                    sampleMobile_ = trajMobile_Cubic_->computeNext();
+                    mobileTask2_->setReference(sampleMobile_);
+                }
+                const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
+                const HQPOutput & sol = solver_->solve(HQPData);
 
-            state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
-            state_.torque_.head(2) = tsid_->getAccelerations(solver_->solve(HQPData)).head(2);
+                state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
+                state_.torque_.head(2) = tsid_->getAccelerations(solver_->solve(HQPData)).head(2);
+                if (time_ > stime_ + action_se3_srv_.response.duration + 1.0)
+                    state_.torque_.head(2).setZero();
+            }
+            else{
+                state_.torque_.setZero();
+            }
         }
 
     }
