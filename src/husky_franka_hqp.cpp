@@ -480,7 +480,7 @@ namespace RobotController{
 
                 state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
                 state_.torque_.head(2) = tsid_->getAccelerations(solver_->solve(HQPData)).head(2);
-                if (time_ > stime_ + node_num_ * 0.1 + 3.0)
+                if (time_ > stime_ + node_num_ * 0.1 + 7.0)
                     state_.torque_.head(2).setZero();
             }
             else{
