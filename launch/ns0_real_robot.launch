@@ -3,10 +3,11 @@
 
   <arg name="robot_ip" default="192.168.10.102" />
   <arg name="load_gripper" default="true" />
+  
+  <group ns ="ns0">
   <param name="robot_group" type="string" value="ns0"/>
   <param name="issimulation" type="bool" value="false"/>
 
-  <group ns ="ns0">
   <include file="$(find franka_control)/launch/franka_control.launch" >
     <arg name="robot_ip" value="$(arg robot_ip)" />
     <arg name="load_gripper" value="$(arg load_gripper)" />
