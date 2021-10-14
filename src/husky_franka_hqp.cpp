@@ -104,9 +104,12 @@ namespace RobotController{
         solver_ = SolverHQPFactory::createNewSolver(SOLVER_HQP_QPOASES, "qpoases");           
 
         // service
-        mobile_action_client_ = n_node_.serviceClient<kimm_path_planner_ros_interface::action_mobile_path>("/" + robot_node_ + "_gui/kimm_path_planner_ros_interface_server/action_mobile_path");
-        joint_action_client_ = n_node_.serviceClient<kimm_joint_planner_ros_interface::action_joint_path>("/" + robot_node_ + "_gui/kimm_joint_planner_ros_interface_server/action_joint_path");
-        se3_action_client_ = n_node_.serviceClient<kimm_se3_planner_ros_interface::action_se3_path>("/" + robot_node_ + "_gui/kimm_se3_planner_ros_interface_server/action_se3_path");    
+        joint_action_subs_ = n_node_.subscribe("/" + robot_node_ + "_gui/kimm_joint_planner_ros_interface_server/joint_action", 1, &RobotController::HuskyFrankaWrapper::jointActionCallback, this);
+        se3_action_subs_ = n_node_.subscribe("/" + robot_node_ + "_gui/kimm_se3_planner_ros_interface_server/se3_action", 1, &RobotController::HuskyFrankaWrapper::se3ActionCallback, this);
+        mobile_action_subs_ = n_node_.subscribe("/" + robot_node_ + "_gui/kimm_path_planner_ros_interface_server/mobile_action", 1, &RobotController::HuskyFrankaWrapper::mobileActionCallback, this);
+        //mobile_action_client_ = n_node_.serviceClient<kimm_path_planner_ros_interface::action_mobile_path>("/" + robot_node_ + "_gui/kimm_path_planner_ros_interface_server/action_mobile_path");
+        //joint_action_client_ = n_node_.serviceClient<kimm_joint_planner_ros_interface::action_joint_path>("/" + robot_node_ + "_gui/kimm_joint_planner_ros_interface_server/action_joint_path");
+        // se3_action_client_ = n_node_.serviceClient<kimm_se3_planner_ros_interface::action_se3_path>("/" + robot_node_ + "_gui/kimm_se3_planner_ros_interface_server/action_se3_path");    
         reset_control_ = true;
         planner_res_ = false;
     }
@@ -317,10 +320,7 @@ namespace RobotController{
         ///////////////////////// Predefined CTRL for GUI //////////////////////////////////////////////////
         if (ctrl_mode_ == 900){ // joint ctrl
             if (mode_change_){
-                action_joint_srv_.request.test.data = true;
-                planner_res_ = joint_action_client_.call(action_joint_srv_);
-
-                if (planner_res_){
+                if (!joint_action_.is_succeed_){
                     tsid_->removeTask("task-mobile");
                     tsid_->removeTask("task-mobile2");
                     tsid_->removeTask("task-se3");
@@ -329,42 +329,30 @@ namespace RobotController{
 
                     tsid_->addMotionTask(*postureTask_, 1e-5, 1);
                     tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                    
-                    VectorXd Kp, Kd;
-                    Kp.setOnes(na_-2);
-                    Kd.setOnes(na_-2);
 
-                    for (int i=0; i<na_-2; i++){
-                        Kp(i) = action_joint_srv_.response.kp[i];
-                        Kd(i) = action_joint_srv_.response.kv[i];
-                        q_ref_(i) = action_joint_srv_.response.target_joint[0].position[i];
-                    }
-                    
-                    if (action_joint_srv_.response.traj_type == 1 || action_joint_srv_.response.traj_type == 2){
+                    if (joint_action_.type_== 1 || joint_action_.type_ == 2){
                         trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                        trajPosture_Cubic_->setDuration(action_joint_srv_.response.duration);
+                        trajPosture_Cubic_->setDuration(joint_action_.duration_);
                         trajPosture_Cubic_->setStartTime(time_);
-                        trajPosture_Cubic_->setGoalSample(q_ref_); 
+                        trajPosture_Cubic_->setGoalSample(joint_action_.q_target_); 
                     }
-                    
                     mode_change_ = false;
-                    update_weight_ = false;
-                    stime_ = time_;
 
-                    postureTask_->Kp(Kp);
-                    postureTask_->Kd(Kd);
+                    stime_ = time_;
+                    postureTask_->Kp(joint_action_.kp_);
+                    postureTask_->Kd(joint_action_.kd_);
                     reset_control_ = false;
                 }
                 else{                    
                     mode_change_ = false;
                 }
             }           
-            if (planner_res_){
-                if (action_joint_srv_.response.traj_type == 0){
+            if (!joint_action_.is_succeed_){
+                if (joint_action_.type_ == 0){
                     samplePosture_.pos.setZero(na_-2);
                     samplePosture_.vel.setZero(na_-2);
                     samplePosture_.acc.setZero(na_-2);
-                    samplePosture_.pos = q_ref_;                    
+                    samplePosture_.pos = joint_action_.q_target_;                    
                 } 
                 else{
                     trajPosture_Cubic_->setCurrentTime(time_);
@@ -376,6 +364,9 @@ namespace RobotController{
 
                 state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
                 state_.torque_.head(2).setZero();
+
+                if (time_ > stime_ + joint_action_.duration_ + 3.0)
+                    joint_action_.is_succeed_ = true;
             }
             else{
                 state_.torque_.setZero();
@@ -383,11 +374,8 @@ namespace RobotController{
         }
         if (ctrl_mode_ == 901){ // base ctrl
             if (mode_change_){
-                action_mobile_srv_.request.test.data = true;
-                planner_res_ = mobile_action_client_.call(action_mobile_srv_);
-                
-                if (planner_res_){
-                    node_num_ = action_mobile_srv_.response.mobile_path.points.size() -1;
+                if (!mobile_action_.is_succeed_){
+                    node_num_ = mobile_action_.path_.size() -1;
                     tsid_->removeTask("task-posture");
                     tsid_->removeTask("task-torque-bounds");
                     tsid_->removeTask("task-mobile");
@@ -424,10 +412,10 @@ namespace RobotController{
                     mode_change_ = false;
                 }
             }           
-            if (planner_res_){
+            if (!mobile_action_.is_succeed_){
                 Vector3d goal_path; 
                 if (node_num_ != -1){
-                    goal_path << action_mobile_srv_.response.mobile_path.points[node_index_].x, action_mobile_srv_.response.mobile_path.points[node_index_].y, action_mobile_srv_.response.mobile_path.points[node_index_].theta; 
+                    goal_path << mobile_action_.path_[node_index_].x, mobile_action_.path_[node_index_].y, mobile_action_.path_[node_index_].theta; 
                     H_mobile_ref_.translation().head(2) = goal_path.head(2);
 
                     H_mobile_ref_.rotation().setIdentity();
@@ -480,8 +468,11 @@ namespace RobotController{
 
                 state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
                 state_.torque_.head(2) = tsid_->getAccelerations(solver_->solve(HQPData)).head(2);
-                if (time_ > stime_ + node_num_ * 0.1 + 7.0)
+                
+                if (time_ > stime_ + node_num_ * 0.1 + 7.0){
                     state_.torque_.head(2).setZero();
+                    mobile_action_.is_succeed_ = true;
+                }
             }
             else{
                 state_.torque_.setZero();
@@ -565,10 +556,7 @@ namespace RobotController{
         }
         if (ctrl_mode_ == 904){ // se3 ctrl
             if (mode_change_){
-                action_se3_srv_.request.test.data = true;
-                planner_res_ = se3_action_client_.call(action_se3_srv_);
-
-                if (planner_res_){
+                if (!se3_action_.is_succeed_){
                     tsid_->removeTask("task-mobile");
                     tsid_->removeTask("task-mobile2");
                     tsid_->removeTask("task-se3");
@@ -579,7 +567,7 @@ namespace RobotController{
                     tsid_->addMotionTask(*postureTask_, 1e-5, 1);
                     tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
 
-                    if (!action_se3_srv_.response.iswholebody.data){
+                    if (!se3_action_.is_wholebody_){
                         tsid_->addMotionTask(*mobileTask2_, 1, 0);
                         trajMobile_Cubic_->setStartTime(time_);
                         trajMobile_Cubic_->setDuration(0.001);
@@ -591,37 +579,16 @@ namespace RobotController{
                     reset_control_ = false;
                     stime_ = time_;
 
-                    H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
-                    VectorXd Kp, Kd;
-                    Kp.setOnes(6);
-                    Kd.setOnes(6);
-
-                    SE3 t_se3_;
-                    Eigen::Quaterniond quat;
-
-                    t_se3_.translation()(0) = action_se3_srv_.response.target_se3[0].translation.x;
-                    t_se3_.translation()(1) = action_se3_srv_.response.target_se3[0].translation.y;
-                    t_se3_.translation()(2) = action_se3_srv_.response.target_se3[0].translation.z;
-                    quat.x() = action_se3_srv_.response.target_se3[0].rotation.x;
-                    quat.y() = action_se3_srv_.response.target_se3[0].rotation.y;
-                    quat.z() = action_se3_srv_.response.target_se3[0].rotation.z;
-                    quat.w() = action_se3_srv_.response.target_se3[0].rotation.w;
-                    quat.normalize();
-
-                    t_se3_.rotation() = quat.toRotationMatrix();
-                    
-                    for (int i=0; i<6; i++){
-                        Kp(i) = action_se3_srv_.response.kp[i];
-                        Kd(i) = action_se3_srv_.response.kv[i];
-                    }
-                    if (action_se3_srv_.response.traj_type == 1 || action_se3_srv_.response.traj_type == 2){
+                    H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));                    
+    
+                    if (se3_action_.type_ == 1 || se3_action_.type_ == 2){
                         trajEE_Cubic_->setInitSample(H_ee_ref_);
-                        trajEE_Cubic_->setDuration(action_se3_srv_.response.duration);
+                        trajEE_Cubic_->setDuration(se3_action_.duration_);
                         trajEE_Cubic_->setStartTime(time_);
-                        trajEE_Cubic_->setGoalSample(t_se3_);  
+                        trajEE_Cubic_->setGoalSample(se3_action_.se3_target_);  
                     }
                     else{
-                        trajEE_Constant_->setReference(t_se3_);
+                        trajEE_Constant_->setReference(se3_action_.se3_target_);
                     }
 
                     trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
@@ -633,8 +600,8 @@ namespace RobotController{
                     mode_change_ = false;
                 }
             }    
-            if (planner_res_){       
-                if (action_se3_srv_.response.traj_type == 0) {
+            if (!se3_action_.is_succeed_){       
+                if (se3_action_.type_ == 0) {
                     sampleEE_ = trajEE_Constant_->computeNext();
                     eeTask_->setReference(sampleEE_);
                 }
@@ -648,7 +615,7 @@ namespace RobotController{
                 samplePosture_ = trajPosture_Cubic_->computeNext();
                 postureTask_->setReference(samplePosture_);
                 
-                if (!action_se3_srv_.response.iswholebody.data){
+                if (!se3_action_.is_wholebody_){
                     trajMobile_Cubic_->setCurrentTime(time_);
                     sampleMobile_ = trajMobile_Cubic_->computeNext();
                     mobileTask2_->setReference(sampleMobile_);
@@ -658,8 +625,10 @@ namespace RobotController{
 
                 state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);
                 state_.torque_.head(2) = tsid_->getAccelerations(solver_->solve(HQPData)).head(2);
-                if (time_ > stime_ + action_se3_srv_.response.duration + 1.0)
+                if (time_ > stime_ + se3_action_.duration_ + 3.0){
                     state_.torque_.head(2).setZero();
+                    se3_action_.is_succeed_ = true;
+                }
             }
             else{
                 state_.torque_.setZero();

@@ -9,6 +9,7 @@
 #include "std_msgs/Float32.h"
 #include "sensor_msgs/JointState.h"
 #include "geometry_msgs/Transform.h"
+#include "geometry_msgs/Pose2D.h"
 #include "std_msgs/Int16.h"
 
 //SYSTEM Header
@@ -33,6 +34,9 @@
 #include "kimm_joint_planner_ros_interface/action_joint_path.h"
 #include "kimm_se3_planner_ros_interface/action_se3_path.h"
 #include "kimm_path_planner_ros_interface/action_mobile_path.h"
+#include "kimm_joint_planner_ros_interface/JointAction.h"
+#include "kimm_se3_planner_ros_interface/SE3Action.h"
+#include "kimm_path_planner_ros_interface/MobileTrajectory.h"
 
 using namespace std;
 using namespace Eigen;
@@ -56,6 +60,26 @@ typedef struct Mob{
     double gamma_, beta_;
     VectorXd p_k_prev_, p_k_, alpha_k_;
 } mob;
+typedef struct Joint_Action{
+    VectorXd kp_, kd_, q_target_;
+    int type_;
+    double duration_;
+    bool is_succeed_{true};
+
+} jointaction;
+typedef struct Mobile_Action{
+    std::vector<geometry_msgs::Pose2D> path_;
+    bool is_succeed_{true};
+} mobileaction;
+typedef struct SE3_Action{
+    VectorXd kp_, kd_;
+    pinocchio::SE3 se3_target_;
+    int type_;
+    double duration_;
+    bool is_wholebody_{true};
+    bool is_succeed_{true};
+
+} se3action;
 
 namespace RobotController{
     class HuskyFrankaWrapper{
@@ -91,11 +115,61 @@ namespace RobotController{
             }
             bool reset_control_;
 
+            void jointActionCallback(const kimm_joint_planner_ros_interface::JointActionConstPtr &msg){
+                joint_action_.kp_.setZero(7);
+                joint_action_.kd_.setZero(7);
+                joint_action_.q_target_.setZero(7);
+                joint_action_.duration_ = msg->duration;
+
+                for (int i=0; i<na_-2; i++){
+                        joint_action_.kp_(i) = msg->kp[i];
+                        joint_action_.kd_(i) = msg->kv[i];
+                        joint_action_.q_target_(i) = msg->target_joint[0].position[i];
+                }
+                
+                joint_action_.type_ = msg->traj_type;
+                joint_action_.is_succeed_ = false;
+            };
+            void se3ActionCallback(const kimm_se3_planner_ros_interface::SE3ActionConstPtr &msg){
+                se3_action_.kp_.setZero(6);
+                se3_action_.kd_.setZero(6);
+                
+                se3_action_.se3_target_.translation()(0) = msg->target_se3[0].translation.x;
+                se3_action_.se3_target_.translation()(1) = msg->target_se3[0].translation.y;
+                se3_action_.se3_target_.translation()(2) = msg->target_se3[0].translation.z;
+                Eigen::Quaterniond quat;
+                quat.x() = msg->target_se3[0].rotation.x;
+                quat.y() = msg->target_se3[0].rotation.y;
+                quat.z() = msg->target_se3[0].rotation.z;
+                quat.w() = msg->target_se3[0].rotation.w;
+                quat.normalize();
+                se3_action_.se3_target_.rotation() = quat.toRotationMatrix();
+                se3_action_.duration_ = msg->duration;
+
+                for (int i=0; i<6; i++){
+                    se3_action_.kp_(i) = msg->kp[i];
+                    se3_action_.kd_(i) = msg->kv[i];
+                }
+                
+                se3_action_.type_ = msg->traj_type;
+                se3_action_.is_wholebody_ = msg->iswholebody.data;
+                se3_action_.is_succeed_ = false;
+            };
+            void mobileActionCallback(const kimm_path_planner_ros_interface::MobileTrajectoryConstPtr &msg){
+                mobile_action_.path_ = msg->points;
+                mobile_action_.is_succeed_ = false;
+            };
+
         private:
             bool issimulation_, mode_change_, update_weight_, planner_res_;
             double stime_, time_, node_index_, node_num_, prev_node_;
             std::string robot_node_;
             State state_;
+            Joint_Action joint_action_;
+            SE3_Action se3_action_;
+            Mobile_Action mobile_action_;
+
+            ros::Subscriber joint_action_subs_, se3_action_subs_, mobile_action_subs_;
         
             int ctrl_mode_;
             Eigen::VectorXd q_ref_;
@@ -127,9 +201,9 @@ namespace RobotController{
             int na_, nq_, nv_;
 
             //service
-            kimm_path_planner_ros_interface::action_mobile_path action_mobile_srv_; 
-            kimm_joint_planner_ros_interface::action_joint_path action_joint_srv_; 
-            kimm_se3_planner_ros_interface::action_se3_path action_se3_srv_; 
+            //kimm_path_planner_ros_interface::action_mobile_path action_mobile_srv_; 
+            // kimm_joint_planner_ros_interface::action_joint_path action_joint_srv_; 
+            // kimm_se3_planner_ros_interface::action_se3_path action_se3_srv_; 
             ros::ServiceClient joint_action_client_, se3_action_client_, mobile_action_client_;
 
             //ros

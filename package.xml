@@ -31,7 +31,6 @@
   <depend>kimm_path_planner_ros_interface</depend>
   <depend>tf</depend>
 
-
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <controller_interface plugin="${prefix}/kimm_husky_controllers_plugin.xml"/>
