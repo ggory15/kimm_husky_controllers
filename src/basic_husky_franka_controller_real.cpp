@@ -190,12 +190,13 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   odom_lpf_(1) = this->lowpassFilter(0.001, odom_msg_.pose.pose.position.y, odom_lpf_prev_(1), 100);
   odom_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.pose.pose.orientation.z, odom_lpf_prev_(2), 100);
   
-  if (group_name_ == "ns0")
-    odom_lpf_(1) += 2.0;
+  // if (group_name_ == "ns0")
+  //   odom_lpf_(1) += 2.0;
 
   odom_dot_lpf_(0) = this->lowpassFilter(0.001, odom_msg_.twist.twist.linear.x, odom_dot_lpf_prev_(0), 100);
   odom_dot_lpf_(1) = this->lowpassFilter(0.001, odom_msg_.twist.twist.linear.y, odom_dot_lpf_prev_(1), 100);
   odom_dot_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.twist.twist.angular.z, odom_dot_lpf_prev_(2), 100);
+  
   odom_lpf_prev_ = odom_lpf_;
   odom_dot_lpf_prev_ = odom_dot_lpf_;
   
@@ -204,7 +205,7 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   tf::Quaternion q;
   
   try{
-      listener_.lookupTransform("/map", "/carto_base_link", ros::Time(0), transform2);
+      listener_.lookupTransform("/map", "/" + group_name_ + "_carto_base_link" , ros::Time(0), transform2);
       origin = transform2.getOrigin();
       q = transform2.getRotation();
       pinocchio::SE3 odom;

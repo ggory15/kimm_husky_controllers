@@ -52,7 +52,7 @@ int main(int argc, char **argv)
         tf::StampedTransform transform2;
         tf::Vector3 origin;
         try{
-            listener.lookupTransform("/map", "/carto_base_link" , ros::Time(0), transform2);
+            listener.lookupTransform("/map", "/" + group_name + "_carto_base_link" , ros::Time(0), transform2);
         }
         catch (tf::TransformException ex){
 
@@ -137,8 +137,8 @@ void JointStateCallback(const sensor_msgs::JointState::ConstPtr& msg){
     
     sensor_msgs::JointState msg_tmp;
     msg_tmp = *msg;
-    if (group_name == "ns0")
-        msg_tmp.position[1] = msg_tmp.position[1] + 2.0;
+    // if (group_name == "ns0")
+    //     msg_tmp.position[1] = msg_tmp.position[1] + 2.0;
 
     ctrl_->franka_update(msg_tmp);
     ctrl_->husky_update(msg_tmp);
