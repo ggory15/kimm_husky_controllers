@@ -293,6 +293,13 @@ void keyboard_event(){
                 cout << "Move EE with wholebody Motion" << endl;
                 cout << " " << endl;
                 break;   
+            case 'x': //home
+                msg = 6;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "Move EE with wholebody Motion" << endl;
+                cout << " " << endl;
+                break; 
             case 'z': //grasp
                 if (isgrasp_){
                     cout << "Release hand" << endl;

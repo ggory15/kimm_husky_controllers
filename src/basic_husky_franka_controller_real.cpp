@@ -414,14 +414,15 @@ void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr 
             gripper_ac_.sendGoal(goal);
         }
         else{
-            isgrasp_=true;
+
+            isgrasp_ = true; 
             franka_gripper::GraspGoal goal;
             franka_gripper::GraspEpsilon epsilon;
-            epsilon.inner = 0.01;
-            epsilon.outer = 0.01;
+            epsilon.inner = 0.02;
+            epsilon.outer = 0.05;
             goal.speed = 0.1;
-            goal.width = 0.01;
-            goal.force = 40.0;
+            goal.width = 0.02;
+            goal.force = 80.0;
             goal.epsilon = epsilon;
             gripper_grasp_ac_.sendGoal(goal);
         }
@@ -605,11 +606,11 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
               isgrasp_ = true; 
               franka_gripper::GraspGoal goal;
               franka_gripper::GraspEpsilon epsilon;
-              epsilon.inner = 0.01;
-              epsilon.outer = 0.01;
+              epsilon.inner = 0.02;
+              epsilon.outer = 0.05;
               goal.speed = 0.1;
-              goal.width = 0.01;
-              goal.force = 40.0;
+              goal.width = 0.02;
+              goal.force = 80.0;
               goal.epsilon = epsilon;
               gripper_grasp_ac_.sendGoal(goal);
           }

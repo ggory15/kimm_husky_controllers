@@ -203,6 +203,7 @@ namespace RobotController{
             kimmhqp::solver::SolverHQPBase * solver_;
             
             int na_, nq_, nv_;
+            int cnt_;
 
             //service
             //kimm_path_planner_ros_interface::action_mobile_path action_mobile_srv_; 
