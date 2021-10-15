@@ -157,6 +157,7 @@ namespace RobotController{
 
     void HuskyFrankaWrapper::ctrl_update(const int& msg){
         ctrl_mode_ = msg;
+        ROS_INFO("[ctrltypeCallback] %d", ctrl_mode_);
         mode_change_ = true;
     }
 
@@ -229,9 +230,11 @@ namespace RobotController{
                 trajEE_Cubic_->setDuration(5.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(0) += 0.5;  
-                H_ee_ref_.translation()(1) -= 0.55;      
-                H_ee_ref_.translation()(2) -= 0.15;                       
+                H_ee_ref_.translation()(0) = 1.5;  
+                H_ee_ref_.translation()(1) = 0;  
+                H_ee_ref_.translation()(2) = 0.5;  
+                // H_ee_ref_.translation()(1) -= 0.55;      
+                // H_ee_ref_.translation()(2) -= 0.15;                       
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
                 H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
@@ -320,6 +323,9 @@ namespace RobotController{
         ///////////////////////// Predefined CTRL for GUI //////////////////////////////////////////////////
         if (ctrl_mode_ == 900){ // joint ctrl
             if (mode_change_){
+                mode_change_ = false;
+                reset_control_ = false;
+
                 if (!joint_action_.is_succeed_){
                     tsid_->removeTask("task-mobile");
                     tsid_->removeTask("task-mobile2");
@@ -336,15 +342,11 @@ namespace RobotController{
                         trajPosture_Cubic_->setStartTime(time_);
                         trajPosture_Cubic_->setGoalSample(joint_action_.q_target_); 
                     }
-                    mode_change_ = false;
-
                     stime_ = time_;
                     postureTask_->Kp(joint_action_.kp_);
                     postureTask_->Kd(joint_action_.kd_);
-                    reset_control_ = false;
-                }
-                else{                    
-                    mode_change_ = false;
+                   
+                    ROS_WARN("%f", joint_action_.duration_);
                 }
             }           
             if (!joint_action_.is_succeed_){
@@ -518,6 +520,7 @@ namespace RobotController{
         }
         if (ctrl_mode_ == 903){ //base backward
             if (mode_change_){
+                
                 stime_ = time_;
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -556,6 +559,9 @@ namespace RobotController{
         }
         if (ctrl_mode_ == 904){ // se3 ctrl
             if (mode_change_){
+                mode_change_ = false;
+                reset_control_ = false;
+
                 if (!se3_action_.is_succeed_){
                     tsid_->removeTask("task-mobile");
                     tsid_->removeTask("task-mobile2");
@@ -566,6 +572,7 @@ namespace RobotController{
                     tsid_->addMotionTask(*eeTask_, 1, 1);
                     tsid_->addMotionTask(*postureTask_, 1e-5, 1);
                     tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                    ROS_WARN("%f", se3_action_.duration_);
 
                     if (!se3_action_.is_wholebody_){
                         tsid_->addMotionTask(*mobileTask2_, 1, 0);
@@ -575,8 +582,7 @@ namespace RobotController{
                         trajMobile_Cubic_->setInitSample(robot_->getMobilePosition(data_, 5));
                     }
 
-                    mode_change_ = false;
-                    reset_control_ = false;
+                    
                     stime_ = time_;
 
                     H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));                    

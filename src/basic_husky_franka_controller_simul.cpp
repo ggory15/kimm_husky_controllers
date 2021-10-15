@@ -45,8 +45,33 @@ int main(int argc, char **argv)
 
     isgrasp_ = false;
     // InitMob();
+    tf::TransformListener listener;
     
     while (ros::ok()){
+        
+        tf::StampedTransform transform2;
+        tf::Vector3 origin;
+        try{
+            listener.lookupTransform("/map", "/carto_base_link" , ros::Time(0), transform2);
+        }
+        catch (tf::TransformException ex){
+
+        }
+        origin = transform2.getOrigin();
+        tf::Quaternion q2;
+        q2 = transform2.getRotation();
+        SE3 odom;
+        odom.translation()(0) = transform2.getOrigin().x();
+        odom.translation()(1) = origin.getY();
+        odom.translation()(2) = origin.getZ();
+        Eigen::Quaterniond quat;
+        quat.x() = q2.x();
+        quat.y() = q2.y();
+        quat.z() = q2.z();
+        quat.w() = q2.w();
+        quat.normalize();
+        odom.rotation() = quat.toRotationMatrix();
+       
         keyboard_event();
 
         // ctrl computation
@@ -125,7 +150,8 @@ void JointStateCallback(const sensor_msgs::JointState::ConstPtr& msg){
     transform.setRotation(q);
 
     br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", group_name + "_rviz_base_link"));
-
+    
+    
 }
 
 void ctrltypeCallback(const std_msgs::Int16ConstPtr &msg){

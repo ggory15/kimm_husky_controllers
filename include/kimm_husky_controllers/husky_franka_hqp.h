@@ -116,6 +116,7 @@ namespace RobotController{
             bool reset_control_;
 
             void jointActionCallback(const kimm_joint_planner_ros_interface::JointActionConstPtr &msg){
+                ROS_WARN("jointActionRecieved");
                 joint_action_.kp_.setZero(7);
                 joint_action_.kd_.setZero(7);
                 joint_action_.q_target_.setZero(7);
@@ -131,6 +132,7 @@ namespace RobotController{
                 joint_action_.is_succeed_ = false;
             };
             void se3ActionCallback(const kimm_se3_planner_ros_interface::SE3ActionConstPtr &msg){
+                ROS_WARN("SE3ActionRecieved");
                 se3_action_.kp_.setZero(6);
                 se3_action_.kd_.setZero(6);
                 
@@ -156,6 +158,8 @@ namespace RobotController{
                 se3_action_.is_succeed_ = false;
             };
             void mobileActionCallback(const kimm_path_planner_ros_interface::MobileTrajectoryConstPtr &msg){
+                ROS_WARN("MobileActionRecieved");
+                ROS_WARN("%d", msg->points.size());
                 mobile_action_.path_ = msg->points;
                 mobile_action_.is_succeed_ = false;
             };

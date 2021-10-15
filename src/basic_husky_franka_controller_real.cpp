@@ -199,13 +199,48 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   odom_lpf_prev_ = odom_lpf_;
   odom_dot_lpf_prev_ = odom_dot_lpf_;
   
+  tf::StampedTransform transform2;
+  tf::Vector3 origin;
+  tf::Quaternion q;
+  
+  try{
+      listener_.lookupTransform("/map", "/carto_base_link", ros::Time(0), transform2);
+      origin = transform2.getOrigin();
+      q = transform2.getRotation();
+      pinocchio::SE3 odom;
+      odom.translation()(0) = origin.getX();
+      odom.translation()(1) = origin.getY();
+      odom.translation()(2) = origin.getZ();
+      Eigen::Quaterniond quat;
+      quat.x() = q.x();
+      quat.y() = q.y();
+      quat.z() = q.z();
+      quat.w() = q.w();
+      quat.normalize();
+      odom.rotation() = quat.toRotationMatrix();
+    
+      odom_lpf_(0) = odom.translation()(0);
+      odom_lpf_(1) = odom.translation()(1);
+      odom_lpf_(2) = atan2(-odom.rotation()(0, 1), odom.rotation()(0,0));
+  }
+  catch (tf::TransformException ex){
+
+  }
+  
+
+  // if (print_rate_trigger_())
+  // {
+  //   ROS_INFO("--------------------------------------------------");
+  //   ROS_WARN_STREAM(odom_lpf_);
+  // }
+  
   // Husky update
   wheel_vel_(0) = husky_state_msg_.velocity[1]; // left vel
   wheel_vel_(1) = husky_state_msg_.velocity[0]; // right vel (not use.)
 
   tf::Transform transform;
   transform.setOrigin( tf::Vector3(odom_lpf_(0), odom_lpf_(1), 0.0 ));
-  tf::Quaternion q;
+  
   q.setRPY(0, 0, odom_lpf_(2));
   transform.setRotation(q);
   br_->sendTransform(tf::StampedTransform(transform, ros::Time::now(), "husky_odom", group_name_ + "_rviz_base_link"));
