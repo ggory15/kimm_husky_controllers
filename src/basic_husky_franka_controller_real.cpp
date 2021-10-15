@@ -204,29 +204,40 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   tf::Vector3 origin;
   tf::Quaternion q;
   
-  // try{
-  //     listener_.lookupTransform("/map", "/" + group_name_ + "_carto_base_link" , ros::Time(0), transform2);
-  //     origin = transform2.getOrigin();
-  //     q = transform2.getRotation();
-  //     pinocchio::SE3 odom;
-  //     odom.translation()(0) = origin.getX();
-  //     odom.translation()(1) = origin.getY();
-  //     odom.translation()(2) = origin.getZ();
-  //     Eigen::Quaterniond quat;
-  //     quat.x() = q.x();
-  //     quat.y() = q.y();
-  //     quat.z() = q.z();
-  //     quat.w() = q.w();
-  //     quat.normalize();
-  //     odom.rotation() = quat.toRotationMatrix();
+  try{
+      listener_.lookupTransform("/" + group_name_ + "_map", "/" + group_name_ + "_carto_base_link" , ros::Time(0), transform2);
+      origin = transform2.getOrigin();
+      q = transform2.getRotation();
+      pinocchio::SE3 odom;
+      odom.translation()(0) = origin.getX();
+      odom.translation()(1) = origin.getY();
+      odom.translation()(2) = origin.getZ();
+      Eigen::Quaterniond quat;
+      quat.x() = q.x();
+      quat.y() = q.y();
+      quat.z() = q.z();
+      quat.w() = q.w();
+      quat.normalize();
+      odom.rotation() = quat.toRotationMatrix();
     
-  //     odom_lpf_(0) = odom.translation()(0);
-  //     odom_lpf_(1) = odom.translation()(1);
-  //     odom_lpf_(2) = atan2(-odom.rotation()(0, 1), odom.rotation()(0,0));
-  // }
-  // catch (tf::TransformException ex){
+      carto_lpf_(0) = odom.translation()(0);
+      carto_lpf_(1) = odom.translation()(1);
+      carto_lpf_(2) = atan2(-odom.rotation()(0, 1), odom.rotation()(0,0));
 
-  // }
+      if (!iscarto_){
+        carto_lpf_prev_ = carto_lpf_;
+        iscarto_ = true;
+      }
+
+      odom_lpf_(0) = this->lowpassFilter(0.001, carto_lpf_(0), carto_lpf_prev_(0), 100);
+      odom_lpf_(1) = this->lowpassFilter(0.001, carto_lpf_(1), carto_lpf_prev_(1), 100);
+      odom_lpf_(2) = this->lowpassFilter(0.001, carto_lpf_(2), carto_lpf_prev_(2), 100);
+
+      carto_lpf_prev_ = carto_lpf_;  
+  }
+  catch (tf::TransformException ex){
+    iscarto_ = true;
+  }
   
 
   // if (print_rate_trigger_())
@@ -597,7 +608,7 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
               epsilon.inner = 0.01;
               epsilon.outer = 0.01;
               goal.speed = 0.1;
-              goal.width = 0.03;
+              goal.width = 0.01;
               goal.force = 40.0;
               goal.epsilon = epsilon;
               gripper_grasp_ac_.sendGoal(goal);
