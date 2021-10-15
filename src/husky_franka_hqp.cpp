@@ -231,8 +231,11 @@ namespace RobotController{
                 trajEE_Cubic_->setDuration(5.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(0) = 2.0;  
-                H_ee_ref_.translation()(1) = 0;  
+                H_ee_ref_.translation()(0) = 2.0;
+                if (robot_node_ == "ns0")  
+                    H_ee_ref_.translation()(1) = -0.6;
+                else    
+                    H_ee_ref_.translation()(1) = +0.6;
                 H_ee_ref_.translation()(2) = 0.5;  
                 
                 H_ee_ref_.rotation().col(0) << cos(M_PI/4.0), sin(M_PI/4.0), 0;
@@ -303,8 +306,8 @@ namespace RobotController{
                 H_ee_ref_.rotation().col(0) << cos(M_PI/4.0), sin(M_PI/4.0), 0;
                 H_ee_ref_.rotation().col(1) << cos(M_PI/4.0), -sin(M_PI/4.0), 0;
                 H_ee_ref_.rotation().col(2) << 0, 0, -1;
-                H_ee_ref_.translation()(2) -= 0.44;
-                H_ee_ref_.translation()(2) -= 0.025 * cnt_;
+                H_ee_ref_.translation()(2) -= 0.47;
+                // H_ee_ref_.translation()(2) -= 0.025 * cnt_;
                                        
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
                 cnt_++;
