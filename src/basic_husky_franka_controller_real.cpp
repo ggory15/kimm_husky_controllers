@@ -349,9 +349,9 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   else if (husky_qvel_(1) < -thes_vel)
     husky_qvel_(1) = -thes_vel;  
   
-  if (abs(husky_qvel_(0)) < 0.05)
+  if (abs(husky_qvel_(0)) < 0.1)
     husky_qvel_(0) = 0.0;
-  if (abs(husky_qvel_(1)) < 0.05)
+  if (abs(husky_qvel_(1)) < 0.1)
     husky_qvel_(1) = 0.0;
 
     
@@ -427,10 +427,14 @@ void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr 
         int data = msg->data;
         husky_qvel_prev_.setZero();
         ctrl_->ctrl_update(data);
+        mob_type_ = 0;
         if  (msg->data == 888)
           mob_type_ = 1;
         if (msg->data == 887)
           mob_type_ = 2;
+        if (msg->data == 11)
+          mob_type_ = 1;
+
     }
     else {
         if (isgrasp_){
