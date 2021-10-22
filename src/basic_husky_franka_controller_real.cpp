@@ -324,7 +324,7 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   franka_torque_ -= Kd * dq_filtered_;  
   franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
 
-  double thres = 1.2;
+  double thres = 1.0;
   if (ctrl_->ctrltype() != 0){
     if (mob_type_ == 1){
       franka_torque_ -= robot_J_.transpose().col(0) * f_filtered_(0) * thres;
@@ -332,7 +332,7 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
       franka_torque_ += robot_J_.transpose().col(2) * f_filtered_(2);
     }
     else if (mob_type_ == 2){
-      franka_torque_ += robot_J_.transpose().col(0) * f_filtered_(0) * thres;
+      franka_torque_ += robot_J_.transpose().col(0) * f_filtered_(0);
       franka_torque_ += robot_J_.transpose().col(1) * f_filtered_(1);
       franka_torque_ += robot_J_.transpose().col(2) * f_filtered_(2);
     }
@@ -427,6 +427,10 @@ void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr 
         int data = msg->data;
         husky_qvel_prev_.setZero();
         ctrl_->ctrl_update(data);
+        if  (msg->data == 888)
+          mob_type_ = 1;
+        if (msg->data == 887)
+          mob_type_ = 2;
     }
     else {
         if (isgrasp_){
@@ -456,8 +460,8 @@ void BasicHuskyFrankaController::mobtypeCallback(const std_msgs::Int16ConstPtr &
     // calculation_mutex_.lock();
     ROS_INFO("[mobtypeCallback] %d", msg->data);
     mob_type_ = msg->data;
-    if (mob_type_ == 1)
-      ctrl_->ctrl_update(888);
+    // if (mob_type_ == 1)
+    //   ctrl_->ctrl_update(888);
     
     // calculation_mutex_.unlock();
 }
@@ -581,7 +585,7 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
           msg = 888;
           ctrl_->ctrl_update(msg);
           mob_type_ = 1;
-          
+
           cout << " " << endl;
           cout << "Move EE with wholebody Motion" << endl;
           cout << " " << endl;

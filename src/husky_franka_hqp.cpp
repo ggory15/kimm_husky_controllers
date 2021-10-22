@@ -510,6 +510,36 @@ namespace RobotController{
         }
 
         ///////////////////////// Predefined CTRL for GUI //////////////////////////////////////////////////
+        if (ctrl_mode_ == 887){
+            if (mode_change_){
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+                
+                tsid_->addMotionTask(*postureTask_, 1e-5, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+
+                q_ref_ = state_.q_.tail(7);
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                trajPosture_Cubic_->setDuration(5.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);      
+                            
+                reset_control_ = false;
+                mode_change_ = false;                
+            }
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+           
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
+
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+            
+        }
         if (ctrl_mode_ == 888){
             if (mode_change_){
                 //remove
