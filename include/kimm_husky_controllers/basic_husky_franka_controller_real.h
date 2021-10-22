@@ -49,6 +49,7 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 typedef Eigen::Matrix<double, 7, 1> Vector7d;
+typedef Eigen::Matrix<double, 6, 1> Vector6d;
 typedef Eigen::Matrix<double, 7, 7> Matrix7d;
 typedef Eigen::Matrix<double, 9, 1> Vector9d;
 
@@ -67,6 +68,7 @@ class BasicHuskyFrankaController : public controller_interface::MultiInterfaceCo
   void odomCallback(const nav_msgs::OdometryConstPtr &msg);
   void huskystateCallback(const sensor_msgs::JointStateConstPtr &msg);
   void ctrltypeCallback(const std_msgs::Int16ConstPtr &msg);
+  void mobtypeCallback(const std_msgs::Int16ConstPtr &msg);  
 
   void asyncCalculationProc(); 
   void modeChangeReaderProc();
@@ -160,8 +162,9 @@ class BasicHuskyFrankaController : public controller_interface::MultiInterfaceCo
     Eigen::Matrix<double, 7, 1> saturateTorqueRate(const Eigen::Matrix<double, 7, 1>& tau_d_calculated, const Eigen::Matrix<double, 7, 1>& tau_J_d);
 
     // Variables
-    const double delta_tau_max_{20.0};
+    const double delta_tau_max_{30.0};
     Vector7d dq_filtered_, franka_torque_, franka_q_;
+    Vector6d f_filtered_, f_;
     Vector3d odom_lpf_, odom_dot_lpf_, odom_lpf_prev_, odom_dot_lpf_prev_, carto_lpf_, carto_lpf_prev_;
     Eigen::VectorXd franka_qacc_, robot_nle_, robot_g_, husky_qvel_, husky_qacc_, husky_qvel_prev_;
     Vector2d husky_cmd_, wheel_vel_;
@@ -173,7 +176,8 @@ class BasicHuskyFrankaController : public controller_interface::MultiInterfaceCo
     State state_;
 
     RobotController::HuskyFrankaWrapper * ctrl_;
-    ros::Subscriber ctrl_type_sub_;
+    ros::Subscriber ctrl_type_sub_, mob_subs_;
+    int mob_type_;
 
   
 };

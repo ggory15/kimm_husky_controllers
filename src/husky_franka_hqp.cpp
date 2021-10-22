@@ -219,7 +219,7 @@ namespace RobotController{
                 tsid_->addMotionTask(*postureTask_, 1e-2, 1);
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1.0, 0);
-                tsid_->addMotionTask(*mobileTask_, 1.0, 1);
+              //  tsid_->addMotionTask(*mobileTask_, 1.0, 1);
 
                 //traj
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
@@ -231,7 +231,7 @@ namespace RobotController{
                 trajEE_Cubic_->setDuration(5.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(0) = 2.0;
+                H_ee_ref_.translation()(0) = 2.5;
                 if (robot_node_ == "ns0")  
                     H_ee_ref_.translation()(1) = -0.6;
                 else    
@@ -268,8 +268,7 @@ namespace RobotController{
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));        
-         //   state_.torque_(0) = 500;
-         //   state_.torque_(1) = 500;
+
         }      
         if (ctrl_mode_ == 3){
             if (mode_change_){
@@ -306,11 +305,10 @@ namespace RobotController{
                 H_ee_ref_.rotation().col(0) << cos(M_PI/4.0), sin(M_PI/4.0), 0;
                 H_ee_ref_.rotation().col(1) << cos(M_PI/4.0), -sin(M_PI/4.0), 0;
                 H_ee_ref_.rotation().col(2) << 0, 0, -1;
-                H_ee_ref_.translation()(2) -= 0.47;
+                H_ee_ref_.translation()(2) = -0.03;
                 // H_ee_ref_.translation()(2) -= 0.025 * cnt_;
                                        
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
-                cnt_++;
 
                 H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
                 // H_mobile_ref_.rotation().col(0) << -1, 0, 0;
@@ -336,8 +334,6 @@ namespace RobotController{
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));        
-         //   state_.torque_(0) = 500;
-         //   state_.torque_(1) = 500;
         }         
         if (ctrl_mode_ == 4){
             if (mode_change_){
@@ -371,7 +367,7 @@ namespace RobotController{
                 trajEE_Cubic_->setDuration(5.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
                 trajEE_Cubic_->setInitSample(H_ee_ref_);     
-                H_ee_ref_.translation()(2) += 0.5;                   
+                H_ee_ref_.translation()(2) = 0.5;                   
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
                 H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
@@ -398,8 +394,7 @@ namespace RobotController{
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));        
-         //   state_.torque_(0) = 500;
-         //   state_.torque_(1) = 500;
+
         }     
         if (ctrl_mode_ == 5){
             if (mode_change_){
@@ -430,6 +425,65 @@ namespace RobotController{
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
                 H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
+                trajMobile_Cubic_->setStartTime(time_);
+                trajMobile_Cubic_->setDuration(5.0);
+                trajMobile_Cubic_->setInitSample(H_mobile_ref_);
+                H_mobile_ref_.rotation().col(0) << 1, 0, 0;
+                H_mobile_ref_.rotation().col(1) << 0, 1, 0;
+                H_mobile_ref_.rotation().col(2) << 0, 0, 1;
+                trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
+                
+                reset_control_ = false;
+                mode_change_ = false;
+            }
+            
+            // husky
+            trajMobile_Cubic_->setCurrentTime(time_);
+            sampleMobile_ = trajMobile_Cubic_->computeNext();
+            mobileTask_->setReference(sampleMobile_);
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);     
+
+            trajEE_Cubic_->setCurrentTime(time_);            
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);        
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));        
+         //   state_.torque_(0) = 500;
+         //   state_.torque_(1) = 500;
+        }       
+        if (ctrl_mode_ == 6){
+            if (mode_change_){
+                //remove
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+                tsid_->addMotionTask(*mobileTask_, 1.0, 0);
+
+                //traj
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                trajPosture_Cubic_->setDuration(1.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2)); 
+
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(5.0);
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
+                trajEE_Cubic_->setInitSample(H_ee_ref_);     
+                H_ee_ref_.translation()(0) += 1.0;                   
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
                 // H_mobile_ref_.rotation().col(0) << -1, 0, 0;
                 // H_mobile_ref_.rotation().col(1) << 0, -1, 0;
                 // H_mobile_ref_.rotation().col(2) << 0, 0, 1;
@@ -452,48 +506,64 @@ namespace RobotController{
             eeTask_->setReference(sampleEE_);        
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));        
-         //   state_.torque_(0) = 500;
-         //   state_.torque_(1) = 500;
-        }       
-        if (ctrl_mode_ == 6){
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));              
+        }
+
+        ///////////////////////// Predefined CTRL for GUI //////////////////////////////////////////////////
+        if (ctrl_mode_ == 888){
             if (mode_change_){
+                //remove
                 tsid_->removeTask("task-mobile");
                 tsid_->removeTask("task-mobile2");
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
-                
-                tsid_->addMotionTask(*postureTask_, 1e-5, 1);
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-2, 1);
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+                tsid_->addMotionTask(*mobileTask_, 1.0, 1);
 
-                q_ref_.setZero(7);
-                q_ref_(0) =  -M_PI / 2.0;
-                q_ref_(1) = 0.0 * M_PI / 180.0;
-                q_ref_(3) = - M_PI / 2.0;
-                q_ref_(5) = M_PI/ 2.0;
-                q_ref_(6) = -M_PI/ 4.0;
-
+                //traj
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                trajPosture_Cubic_->setDuration(5.0);
+                trajPosture_Cubic_->setDuration(1.0);
                 trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);      
-                            
+                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2)); 
+
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(5.0);
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7"));
+                trajEE_Cubic_->setInitSample(H_ee_ref_);
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                H_mobile_ref_ = robot_->getMobilePosition(data_, 5);
+                // H_mobile_ref_.rotation().col(0) << -1, 0, 0;
+                // H_mobile_ref_.rotation().col(1) << 0, -1, 0;
+                // H_mobile_ref_.rotation().col(2) << 0, 0, 1;
+                
                 reset_control_ = false;
-                mode_change_ = false;                
+                mode_change_ = false;
             }
+            
+            // husky
+            trajMobile_Constant_->setReference(H_mobile_ref_);
+            sampleMobile_ = trajMobile_Constant_->computeNext();
+            mobileTask_->setReference(sampleMobile_);
 
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-           
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
+            postureTask_->setReference(samplePosture_);     
 
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+            trajEE_Cubic_->setCurrentTime(time_);            
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            sampleEE_.pos.head(2) = robot_->position(data_, robot_->model().getJointId("panda_joint7")).translation().head(2);
             
-        }
+            eeTask_->setReference(sampleEE_);        
 
-        ///////////////////////// Predefined CTRL for GUI //////////////////////////////////////////////////
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));        
+        }
         if (ctrl_mode_ == 900){ // joint ctrl
             if (mode_change_){
                 mode_change_ = false;

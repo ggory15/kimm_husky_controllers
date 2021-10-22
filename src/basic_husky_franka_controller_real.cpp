@@ -20,6 +20,7 @@ bool BasicHuskyFrankaController::init(hardware_interface::RobotHW* robot_hw, ros
   husky_ctrl_pub_.init(node_handle, "/" + group_name_ + "/husky/cmd_vel", 4);
   
   ctrl_type_sub_ = node_handle.subscribe("/" + group_name_ + "/real_robot/ctrl_type", 1, &BasicHuskyFrankaController::ctrltypeCallback, this);
+  mob_subs_ = node_handle.subscribe("/" + group_name_ + "/real_robot/mob_type", 1, &BasicHuskyFrankaController::mobtypeCallback, this);
   odom_subs_ = node_handle.subscribe( "/" + group_name_ + "/husky/odometry/filtered", 1, &BasicHuskyFrankaController::odomCallback, this);
   husky_state_msg_.position.resize(4);
   husky_state_msg_.velocity.resize(4);
@@ -121,12 +122,14 @@ void BasicHuskyFrankaController::starting(const ros::Time& time) {
   odom_dot_lpf_prev_(2) = odom_msg_.twist.twist.angular.z;  
   
   time_ = 0.;
+  mob_type_ = 0;
 
   robot_command_msg_.torque.resize(7);
   robot_state_msg_.position.resize(11);
   robot_state_msg_.velocity.resize(11);   
 
   husky_qvel_prev_.setZero(2);
+  f_filtered_.setZero();
   
   br_ = new tf::TransformBroadcaster();
 
@@ -178,6 +181,8 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   Eigen::Map<Vector7d> franka_q(robot_state.q.data());
   Eigen::Map<Vector7d> franka_dq(robot_state.dq.data());
   franka_q_ = franka_q;
+  Eigen::Map<Eigen::Matrix<double, 6, 1>> force_franka(robot_state.O_F_ext_hat_K.data());
+  f_ = force_franka;
 
   // Filtering
   double cutoff = 20.0; // Hz //20
@@ -186,6 +191,8 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   double alpha = dt / (RC + dt);
   
   dq_filtered_ = alpha * franka_dq + (1 - alpha) * dq_filtered_;
+  f_filtered_ = alpha * f_ + (1 - alpha) * f_filtered_;
+
   odom_lpf_(0) = this->lowpassFilter(0.001, odom_msg_.pose.pose.position.x, odom_lpf_prev_(0), 100);
   odom_lpf_(1) = this->lowpassFilter(0.001, odom_msg_.pose.pose.position.y, odom_lpf_prev_(1), 100);
   odom_lpf_(2) = this->lowpassFilter(0.001, odom_msg_.pose.pose.orientation.z, odom_lpf_prev_(2), 100);
@@ -317,8 +324,22 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   franka_torque_ -= Kd * dq_filtered_;  
   franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
 
+  double thres = 1.2;
+  if (ctrl_->ctrltype() != 0){
+    if (mob_type_ == 1){
+      franka_torque_ -= robot_J_.transpose().col(0) * f_filtered_(0) * thres;
+      franka_torque_ -= robot_J_.transpose().col(1) * f_filtered_(1);
+      franka_torque_ += robot_J_.transpose().col(2) * f_filtered_(2);
+    }
+    else if (mob_type_ == 2){
+      franka_torque_ += robot_J_.transpose().col(0) * f_filtered_(0) * thres;
+      franka_torque_ += robot_J_.transpose().col(1) * f_filtered_(1);
+      franka_torque_ += robot_J_.transpose().col(2) * f_filtered_(2);
+    }
+  }
+
   husky_qvel_ = husky_qacc_ * 0.01;//  + husky_qvel_prev_;
-  double thes_vel = 3.0;
+  double thes_vel = 5.0;
   if (husky_qvel_(0) > thes_vel)
     husky_qvel_(0) = thes_vel;
   else if (husky_qvel_(0) < -thes_vel)
@@ -328,14 +349,16 @@ void BasicHuskyFrankaController::update(const ros::Time& time, const ros::Durati
   else if (husky_qvel_(1) < -thes_vel)
     husky_qvel_(1) = -thes_vel;  
   
-  if (abs(husky_qvel_(0)) < 0.1)
+  if (abs(husky_qvel_(0)) < 0.05)
     husky_qvel_(0) = 0.0;
-  if (abs(husky_qvel_(1)) < 0.1)
+  if (abs(husky_qvel_(1)) < 0.05)
     husky_qvel_(1) = 0.0;
 
     
   husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
   husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
+  husky_cmd_ *= 1.0;
+
   husky_qvel_prev_ = husky_qvel_;
   if (ctrl_->reset_control_)
     husky_qvel_prev_.setZero();
@@ -429,57 +452,20 @@ void BasicHuskyFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr 
     }
     // calculation_mutex_.unlock();
 }
+void BasicHuskyFrankaController::mobtypeCallback(const std_msgs::Int16ConstPtr &msg){
+    // calculation_mutex_.lock();
+    ROS_INFO("[mobtypeCallback] %d", msg->data);
+    mob_type_ = msg->data;
+    if (mob_type_ == 1)
+      ctrl_->ctrl_update(888);
+    
+    // calculation_mutex_.unlock();
+}
 void BasicHuskyFrankaController::asyncCalculationProc(){
   calculation_mutex_.lock();
   
   ctrl_->husky_update(odom_lpf_, odom_dot_lpf_, Vector2d::Zero(), wheel_vel_);
   ctrl_->franka_update(franka_q_, dq_filtered_);
-
-  // ctrl_->compute(time_);
-  
-  // ctrl_->franka_output(franka_qacc_); 
-  // ctrl_->husky_output(husky_qacc_); 
-
-  // ctrl_->state(state_);
-
-  // ctrl_->mass(robot_mass_);
-  // // robot_mass_(4, 4) *= 6.0;
-  // // robot_mass_(5, 5) *= 6.0;
-  // // robot_mass_(6, 6) *= 10.0;
-  
-  // franka_torque_ = robot_mass_ * franka_qacc_ + robot_nle_;
-
-  // MatrixXd Kd(7, 7);
-  // Kd.setIdentity();
-  // Kd = 2.0 * sqrt(5.0) * Kd;
-  // Kd(5, 5) = 0.2;
-  // Kd(4, 4) = 0.2;
-  // Kd(6, 6) = 0.2; // this is practical term
-  // franka_torque_ -= Kd * dq_filtered_;  
-  // franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_);
-
-  // husky_qvel_ = husky_qacc_ * 0.01;//  + husky_qvel_prev_;
-  // double thes_vel = 1.0;
-  // if (husky_qvel_(0) > thes_vel)
-  //   husky_qvel_(0) = thes_vel;
-  // else if (husky_qvel_(0) < -thes_vel)
-  //   husky_qvel_(0) = -thes_vel;
-  // if (husky_qvel_(1) > thes_vel)
-  //   husky_qvel_(1) = thes_vel;
-  // else if (husky_qvel_(1) < -thes_vel)
-  //   husky_qvel_(1) = -thes_vel;  
-    
-  // husky_cmd_(0) = 0.165 * (husky_qvel_(0) + husky_qvel_(1)) / 2.0;
-  // husky_cmd_(1) = (-husky_qvel_(0) + husky_qvel_(1)) * 0.165;
-  // husky_qvel_prev_ = husky_qvel_;
-  // if (ctrl_->reset_control_)
-  //   husky_qvel_prev_.setZero();
-
-  // this->setFrankaCommand();
-  // this->setHuskyCommand();
-
-  // this->getEEState();
-  // this->getBaseState();
 
   calculation_mutex_.unlock();
 }
@@ -590,7 +576,17 @@ void BasicHuskyFrankaController::modeChangeReaderProc(){
           cout << "Move EE with wholebody Motion" << endl;
           cout << " " << endl;
           husky_qvel_prev_.setZero();
-          break;    
+          break;   
+      case 'c': //home
+          msg = 888;
+          ctrl_->ctrl_update(msg);
+          mob_type_ = 1;
+          
+          cout << " " << endl;
+          cout << "Move EE with wholebody Motion" << endl;
+          cout << " " << endl;
+          husky_qvel_prev_.setZero();
+          break;   
       case 'z': //grasp
           msg = 899;
           if (isgrasp_){
